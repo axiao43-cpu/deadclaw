@@ -84,6 +84,7 @@ jobs:
           retention-days: 7
           path: |
             out/win32-x64/*.exe
+            out/win32-x64/latest.yml
 
   build-win-arm64:
     runs-on: windows-latest
@@ -112,6 +113,7 @@ jobs:
           retention-days: 7
           path: |
             out/win32-arm64/*.exe
+            out/win32-arm64/latest.yml
 
   create-release:
     needs: [build-mac-arm64, build-mac-x64, build-win-x64, build-win-arm64]
