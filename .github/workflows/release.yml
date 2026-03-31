@@ -1,0 +1,156 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-mac-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - name: 构建 macOS arm64
+        env:
+          npm_config_registry: https://registry.npmjs.org/
+          npm_config_electron_builder_binaries_mirror: https://github.com/electron-userland/electron-builder-binaries/releases/download/
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run dist:mac:arm64
+      - name: 清理 blockmap
+        run: find out/darwin-arm64 -type f -name "*.blockmap" -delete
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-arm64
+          retention-days: 7
+          path: |
+            out/darwin-arm64/*.dmg
+            out/darwin-arm64/*.zip
+
+  build-mac-x64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - name: 构建 macOS x64
+        env:
+          npm_config_registry: https://registry.npmjs.org/
+          npm_config_electron_builder_binaries_mirror: https://github.com/electron-userland/electron-builder-binaries/releases/download/
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run dist:mac:x64
+      - name: 清理 blockmap
+        run: find out/darwin-x64 -type f -name "*.blockmap" -delete
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-x64
+          retention-days: 7
+          path: |
+            out/darwin-x64/*.dmg
+            out/darwin-x64/*.zip
+
+  build-win-x64:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - name: 让 npm 通过 bash 执行 scripts
+        run: npm config set script-shell "$(which bash)"
+      - name: 构建 Windows x64
+        env:
+          npm_config_registry: https://registry.npmjs.org/
+          npm_config_electron_builder_binaries_mirror: https://github.com/electron-userland/electron-builder-binaries/releases/download/
+        run: npm run dist:win:x64
+      - name: 清理 blockmap
+        run: find out/win32-x64 -type f -name "*.blockmap" -delete
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-x64
+          retention-days: 7
+          path: |
+            out/win32-x64/*.exe
+
+  build-win-arm64:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - name: 让 npm 通过 bash 执行 scripts
+        run: npm config set script-shell "$(which bash)"
+      - name: 构建 Windows arm64
+        env:
+          npm_config_registry: https://registry.npmjs.org/
+          npm_config_electron_builder_binaries_mirror: https://github.com/electron-userland/electron-builder-binaries/releases/download/
+        run: npm run dist:win:arm64
+      - name: 清理 blockmap
+        run: find out/win32-arm64 -type f -name "*.blockmap" -delete
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-arm64
+          retention-days: 7
+          path: |
+            out/win32-arm64/*.exe
+
+  create-release:
+    needs: [build-mac-arm64, build-mac-x64, build-win-x64, build-win-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载 mac-arm64
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-arm64
+          path: release
+
+      - name: 下载 mac-x64
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-x64
+          path: release
+
+      - name: 下载 win-x64
+        uses: actions/download-artifact@v4
+        with:
+          name: win-x64
+          path: release
+
+      - name: 下载 win-arm64
+        uses: actions/download-artifact@v4
+        with:
+          name: win-arm64
+          path: release
+
+      - name: 列出产物
+        run: ls -lh release/
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          draft: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
