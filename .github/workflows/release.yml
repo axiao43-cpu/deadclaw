@@ -125,19 +125,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: mac-arm64
-          path: release
+          path: out/darwin-arm64
 
       - name: 下载 mac-x64
         uses: actions/download-artifact@v4
         with:
           name: mac-x64
-          path: release
+          path: out/darwin-x64
 
       - name: 下载 win-x64
         uses: actions/download-artifact@v4
         with:
           name: win-x64
-          path: release
+          path: out/win32-x64
 
       - name: 下载 win-arm64
         uses: actions/download-artifact@v4
