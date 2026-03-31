@@ -22,10 +22,8 @@ const {
 // ─── 项目根目录 ───
 const ROOT = path.resolve(__dirname, "..");
 const TARGETS_ROOT = path.join(ROOT, "resources", "targets");
-const KIMI_CLAW_BASE_URL = "https://cdn.kimi.com/kimi-claw";
-const KIMI_CLAW_DEFAULT_TGZ_URL = `${KIMI_CLAW_BASE_URL}/kimi-claw-latest.tgz`;
-const KIMI_CLAW_CACHE_FILE = "kimi-claw-latest.tgz";
-const KIMI_SEARCH_DEFAULT_TGZ_URL = `${KIMI_CLAW_BASE_URL}/openclaw-kimi-search-0.1.2.tgz`;
+const KIMI_PLUGIN_BASE_URL = "https://cdn.kimi.com/kimi-claw";
+const KIMI_SEARCH_DEFAULT_TGZ_URL = `${KIMI_PLUGIN_BASE_URL}/openclaw-kimi-search-0.1.2.tgz`;
 const KIMI_SEARCH_CACHE_FILE = "openclaw-kimi-search-0.1.2.tgz";
 const QQBOT_PACKAGE_NAME = "@sliverp/qqbot";
 const DINGTALK_CONNECTOR_PACKAGE_NAME = "@dingtalk-real-ai/dingtalk-connector";
@@ -46,7 +44,7 @@ function getTargetPaths(platform, arch) {
     runtimeDir: path.join(targetBase, "runtime"),
     gatewayDir: path.join(targetBase, "gateway"),
     iconPath: path.join(targetBase, "app-icon.png"),
-    analyticsConfigPath: path.join(targetBase, "analytics-config.json"),
+    buildConfigPath: path.join(targetBase, "build-config.json"),
   };
 }
 
@@ -120,35 +118,38 @@ function rmDir(dir) {
         try {
           const tempDir = `${dir}_delete_${Date.now()}_${process.pid}`;
           fs.renameSync(dir, tempDir);
-          // 重命名成功后，删除重命名的目录（后台操作，不等待）
           try {
             fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 0 });
           } catch {
             // 忽略删除失败，反正已经重命名移走了
           }
           return;
-        } catch (renameErr) {
-          // 重命名也失败了，抛出原始错误
+        } catch {
           throw err;
         }
       }
 
-      // Windows 文件锁定，等待后重试
       const message = err.code === "EBUSY"
-          ? `文件被占用，等待 ${retryDelayMs}ms 后重试 (${attempt}/${maxRetries})`
-          : `目录非空，等待 ${retryDelayMs}ms 后重试 (${attempt}/${maxRetries})`;
+        ? `文件被占用，等待 ${retryDelayMs}ms 后重试 (${attempt}/${maxRetries})`
+        : `目录非空，等待 ${retryDelayMs}ms 后重试 (${attempt}/${maxRetries})`;
 
       if (attempt === 1) {
-        // 只在第一次重试时打印消息，避免刷屏
         console.log(`  [提示] ${message}`);
       }
 
-      // 同步延迟（使用同步方式避免异步复杂度）
       const start = Date.now();
       while (Date.now() - start < retryDelayMs) {
         // 忙等待（在构建脚本中可以接受）
       }
     }
+  }
+}
+
+function cleanupDirBestEffort(dir, label = dir) {
+  try {
+    rmDir(dir);
+  } catch (err) {
+    log(`⚠ 跳过清理 ${label}: ${err.message || String(err)}`);
   }
 }
 
@@ -675,10 +676,12 @@ function buildAnalyticsConfig() {
   };
 }
 
-function writeAnalyticsConfig(configPath) {
-  const config = buildAnalyticsConfig();
+function writeBuildConfig(configPath) {
+  const config = {
+    analytics: buildAnalyticsConfig(),
+  };
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  log(`已生成 analytics-config.json（enabled=${config.enabled ? "true" : "false"}）`);
+  log(`已生成 build-config.json（enabled=${config.analytics.enabled ? "true" : "false"}）`);
 }
 
 // ─── Step 2: 安装 openclaw 生产依赖 ───
@@ -1171,20 +1174,10 @@ function hasGatewayRespawnWindowsHide(source) {
   return /spawn\(process\.execPath, args, \{[\s\S]*?windowsHide:\s*true[\s\S]*?env: process\.env,/.test(source);
 }
 
-// ─── Step 2.5: 注入 bundled 插件（kimi-claw + kimi-search + qqbot + dingtalk） ───
+// ─── Step 2.5: 注入 bundled 插件（kimi-search + qqbot + dingtalk） ───
 
 // 插件定义（id → 下载/缓存参数）
 const BUNDLED_PLUGINS = [
-  {
-    id: "kimi-claw",
-    localEnv: "ONECLAW_KIMI_CLAW_TGZ_PATH",
-    urlEnv: "ONECLAW_KIMI_CLAW_TGZ_URL",
-    refreshEnv: "ONECLAW_KIMI_CLAW_REFRESH",
-    defaultURL: KIMI_CLAW_DEFAULT_TGZ_URL,
-    cacheFile: KIMI_CLAW_CACHE_FILE,
-    // 校验解压产物必须包含的文件
-    requiredFiles: ["package.json", "openclaw.plugin.json"],
-  },
   {
     id: "kimi-search",
     localEnv: "ONECLAW_KIMI_SEARCH_TGZ_PATH",
@@ -1333,14 +1326,14 @@ async function bundleNpmPackagePlugin(plugin, gatewayDir, targetId, opts) {
   try {
     npmInstallWithRetry(tmpDir, opts);
   } catch (err) {
-    rmDir(tmpDir);
+    cleanupDirBestEffort(tmpDir, `${plugin.id} 临时安装目录`);
     die(`安装 ${plugin.id} 插件失败: ${err.message || String(err)}`);
   }
 
   // 定位已安装的插件包
   const installedPkgDir = resolveInstalledPackageDir(tmpDir, plugin.packageName);
   if (!fs.existsSync(installedPkgDir)) {
-    rmDir(tmpDir);
+    cleanupDirBestEffort(tmpDir, `${plugin.id} 临时安装目录`);
     die(`安装 ${plugin.id} 后未找到包目录: ${installedPkgDir}`);
   }
   assertPluginDir(plugin, installedPkgDir, "");
@@ -1389,7 +1382,7 @@ async function bundleNpmPackagePlugin(plugin, gatewayDir, targetId, opts) {
   pruneDanglingBinLinks(pluginNm);
 
   // 清理临时目录
-  rmDir(tmpDir);
+  cleanupDirBestEffort(tmpDir, `${plugin.id} 临时安装目录`);
 
   // 写入版本戳
   fs.writeFileSync(
@@ -1429,19 +1422,19 @@ async function bundlePlugin(plugin, gatewayDir, targetId, opts) {
     } catch (err) {
       if (attempt === 1 && source.sourceURL) {
         log(`检测到 ${plugin.id} 缓存包可能损坏，重新下载后重试...`);
-        rmDir(tmpDir);
+        cleanupDirBestEffort(tmpDir, `${plugin.id} 解压临时目录`);
         ensureDir(tmpDir);
         safeUnlink(source.archivePath);
         await downloadFileWithFallback([source.sourceURL], source.archivePath);
         continue;
       }
-      rmDir(tmpDir);
+      cleanupDirBestEffort(tmpDir, `${plugin.id} 解压临时目录`);
       die(`解压 ${plugin.id} 包失败: ${err.message || String(err)}`);
     }
   }
 
   if (!extracted) {
-    rmDir(tmpDir);
+    cleanupDirBestEffort(tmpDir, `${plugin.id} 解压临时目录`);
     die(`解压 ${plugin.id} 包失败（未知原因）`);
   }
 
@@ -1450,13 +1443,13 @@ async function bundlePlugin(plugin, gatewayDir, targetId, opts) {
   try {
     assertPluginDir(plugin, extractedPkgDir, "package/");
   } catch (err) {
-    rmDir(tmpDir);
+    cleanupDirBestEffort(tmpDir, `${plugin.id} 解压临时目录`);
     throw err;
   }
 
   rmDir(pluginDir);
   copyDirSync(extractedPkgDir, pluginDir);
-  rmDir(tmpDir);
+  cleanupDirBestEffort(tmpDir, `${plugin.id} 解压临时目录`);
 
   const stamp = { source: source.sourceLabel, bundledAt: new Date().toISOString() };
   fs.writeFileSync(
@@ -1623,10 +1616,10 @@ function pruneNodeModules(nmDir) {
   log(`node_modules 裁剪统计: 删除文件 ${removedFiles} 个，删除目录 ${removedDirs} 个`);
 }
 
-// ─── Step 3: 生成埋点配置 ───
+// ─── Step 3: 生成构建配置 ───
 
-function generateAnalyticsConfig(targetPaths) {
-  writeAnalyticsConfig(targetPaths.analyticsConfigPath);
+function generateBuildConfig(targetPaths) {
+  writeBuildConfig(targetPaths.buildConfigPath);
 }
 
 // ─── Step 4: 拷贝图标资源 ───
@@ -1680,12 +1673,11 @@ function verifyOutput(targetPaths, platform) {
     path.join(targetRel, "gateway", "node_modules", "openclaw", "dist", "entry.js"),
     path.join(targetRel, "gateway", "node_modules", "openclaw", "dist", "control-ui", "index.html"),
     path.join(targetRel, "gateway", "node_modules", "clawhub", "bin", "clawdhub.js"),
-    path.join(targetRel, "analytics-config.json"),
+    path.join(targetRel, "build-config.json"),
     path.join(targetRel, "app-icon.png"),
   ];
 
   required.push(
-      path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "kimi-claw", "openclaw.plugin.json"),
       path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "kimi-search", "openclaw.plugin.json"),
       path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "qqbot", "openclaw.plugin.json"),
       path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "dingtalk-connector", "openclaw.plugin.json"),
@@ -1740,15 +1732,15 @@ async function main() {
 
   console.log();
 
-  // Step 2.5: 注入 bundled 插件（kimi-claw + kimi-search + qqbot + dingtalk）
+  // Step 2.5: 注入 bundled 插件（kimi-search + qqbot + dingtalk）
   log("Step 2.5: 注入 bundled 插件");
   await bundleAllPlugins(targetPaths.gatewayDir, targetPaths.targetId, opts);
 
   console.log();
 
-  // Step 3: 生成埋点配置（URL / API Key 仅来自打包环境变量）
-  log("Step 3: 生成埋点配置");
-  generateAnalyticsConfig(targetPaths);
+  // Step 3: 生成构建配置
+  log("Step 3: 生成构建配置");
+  generateBuildConfig(targetPaths);
 
   console.log();
 

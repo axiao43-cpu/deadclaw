@@ -9,7 +9,7 @@ const vm = require("node:vm");
 function loadPackageResourcesSandbox(options = {}) {
   const scriptPath = path.join(__dirname, "package-resources.js");
   const rawSource = fs.readFileSync(scriptPath, "utf-8");
-  const source = rawSource.replace(/\nmain\(\)\.catch\(\(err\) => \{\n[\s\S]*?\n\}\);\s*$/, "\n");
+  const source = rawSource.replace(/\r?\nmain\(\)\.catch\(\(err\) => \{\r?\n[\s\S]*?\r?\n\}\);\s*$/, "\n");
   const sandboxProcess = options.process || Object.assign(Object.create(process), {
     argv: process.argv.slice(),
     env: { ...process.env },
@@ -213,7 +213,6 @@ test("verifyOutput 应要求基础扩展插件存在", () => {
     "memory-core",
     "device-pair",
     "imessage",
-    "kimi-claw",
     "kimi-search",
     "qqbot",
     "dingtalk-connector",
