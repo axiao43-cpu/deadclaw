@@ -1,5 +1,5 @@
 // ============================================
-// OneClaw Settings — 双栏设置交互逻辑
+// DeadClaw Settings — 双栏设置交互逻辑
 // ============================================
 
 (function () {
@@ -124,15 +124,13 @@
       "nav.chat": "Remote Control",
       "nav.feishu": "Feishu Integration",
       "chat.title": "Remote Control",
-      "chat.desc": "Connect WeChat, Feishu, WeCom, DingTalk, Kimi, or QQ to control OneClaw remotely from your messaging app",
+      "chat.desc": "Connect WeChat, Feishu, WeCom, DingTalk, or QQ to control DeadClaw remotely from your messaging app",
       "chat.platformFeishu": "Feishu",
       "chat.platformFeishuMeta": "Lark / Feishu bot",
       "chat.platformWecom": "WeCom",
       "chat.platformWecomMeta": "WeCom AI bot",
       "chat.platformDingtalk": "DingTalk",
       "chat.platformDingtalkMeta": "DingTalk stream connector",
-      "chat.platformKimi": "KimiClaw",
-      "chat.platformKimiMeta": "Kimi bot bridge",
       "chat.platformQq": "QQ",
       "chat.platformQqMeta": "QQ Open Platform Bot",
       "provider.title": "Model Configuration",
@@ -224,7 +222,7 @@
       "feishu.approvedRemoved": "Authorization removed",
       "feishu.kindUser": "User",
       "feishu.kindGroup": "Group",
-      "wecom.desc": "Connect WeCom so users can talk to OneClaw directly in WeCom",
+      "wecom.desc": "Connect WeCom so users can talk to DeadClaw directly in WeCom",
       "wecom.enabled": "Enable",
       "wecom.botId": "Bot ID",
       "wecom.secret": "Secret",
@@ -237,23 +235,23 @@
       "wecom.groupPolicyDisabled": "Ignore all group messages",
       "wecom.groupAllowFrom": "Group Allowlist",
       "wecom.groupAllowFromHint": "One group ID per line. This only applies when group access mode is allowlist",
-      "wecom.dmHint": "Pairing is recommended for direct messages. When set to open, OneClaw will automatically write allowFrom=[\"*\"]",
+      "wecom.dmHint": "Pairing is recommended for direct messages. When set to open, DeadClaw will automatically write allowFrom=[\"*\"]",
       "wecom.docs": "Plugin README →",
       "wecom.getKey": "Open WeCom Admin →",
       "wecom.save": "Save",
       "wecom.saving": "Saving…",
-      "dingtalk.desc": "Connect DingTalk so users can talk to OneClaw directly in DingTalk",
+      "dingtalk.desc": "Connect DingTalk so users can talk to DeadClaw directly in DingTalk",
       "dingtalk.enabled": "Enable",
       "dingtalk.clientId": "Client ID / AppKey",
       "dingtalk.clientSecret": "Client Secret / AppSecret",
       "dingtalk.sessionTimeout": "Session Timeout (ms)",
       "dingtalk.sessionTimeoutHint": "Default is 1800000 ms (30 minutes)",
-      "dingtalk.gatewayHint": "OneClaw will auto-use the current gateway token and enable the required chatCompletions HTTP endpoint",
+      "dingtalk.gatewayHint": "DeadClaw will auto-use the current gateway token and enable the required chatCompletions HTTP endpoint",
       "dingtalk.docs": "Setup Guide →",
       "dingtalk.getKey": "Open DingTalk Open Platform →",
       "dingtalk.save": "Save",
       "dingtalk.saving": "Saving…",
-      "qq.desc": "Connect QQ Bot so users can talk to OneClaw directly in QQ",
+      "qq.desc": "Connect QQ Bot so users can talk to DeadClaw directly in QQ",
       "qq.enabled": "Enable",
       "qq.appId": "QQ Bot App ID",
       "qq.clientSecret": "Client Secret",
@@ -264,7 +262,7 @@
       "qq.saving": "Saving…",
       "chat.platformWeixin": "WeChat",
       "chat.platformWeixinMeta": "WeChat QR login",
-      "weixin.desc": "Scan a QR code with WeChat to connect OneClaw and chat directly in WeChat",
+      "weixin.desc": "Scan a QR code with WeChat to connect DeadClaw and chat directly in WeChat",
       "weixin.login": "Connect WeChat",
       "weixin.cancel": "Cancel",
       "weixin.waitingScan": "Scan with the latest WeChat to log in",
@@ -273,9 +271,9 @@
       "weixin.loginFailed": "Login failed",
       "weixin.disconnect": "Disconnect",
       "weixin.disconnected": "Disconnected",
-      "weixin.notBundled": "WeChat plugin not found. Please reinstall OneClaw.",
+      "weixin.notBundled": "WeChat plugin not found. Please reinstall DeadClaw.",
       "weixin.gatewayNotRunning": "Gateway is not running. Please start it first.",
-      "error.weixinNotBundled": "WeChat plugin not found. Please reinstall OneClaw.",
+      "error.weixinNotBundled": "WeChat plugin not found. Please reinstall DeadClaw.",
       "error.noPairingCode": "Invalid pairing code",
       "error.loadPairingFailed": "Failed to load pairing requests",
       "error.loadApprovedFailed": "Failed to load approved accounts",
@@ -285,35 +283,23 @@
       "error.noAppSecret": "Please enter the App Secret",
       "error.noWecomBotId": "Please enter the WeCom Bot ID",
       "error.noWecomSecret": "Please enter the WeCom Secret",
-      "error.wecomNotBundled": "WeCom plugin is missing. Please reinstall OneClaw",
+      "error.wecomNotBundled": "WeCom plugin is missing. Please reinstall DeadClaw",
       "error.noDingtalkClientId": "Please enter the DingTalk Client ID / AppKey",
       "error.noDingtalkClientSecret": "Please enter the DingTalk Client Secret / AppSecret",
       "error.invalidDingtalkSessionTimeout": "Please enter a valid session timeout in milliseconds",
-      "error.dingtalkNotBundled": "DingTalk connector is missing. Please reinstall OneClaw",
+      "error.dingtalkNotBundled": "DingTalk connector is missing. Please reinstall DeadClaw",
       "error.noQqAppId": "Please enter the QQ Bot App ID",
       "error.noQqClientSecret": "Please enter the QQ Bot Client Secret",
-      "error.qqNotBundled": "QQ Bot component is missing. Please reinstall OneClaw",
+      "error.qqNotBundled": "QQ Bot component is missing. Please reinstall DeadClaw",
       "error.noKey": "Please enter your API key",
       "error.noBaseUrl": "Please enter the Base URL",
       "error.noModelId": "Please enter the Model ID",
       "error.verifyFailed": "Verification failed. Please check your API key",
       "error.connection": "Connection error: ",
-      "nav.kimi": "KimiClaw",
       "nav.search": "Search",
       "nav.memory": "Memory",
       "nav.appearance": "Appearance",
       "nav.backup": "Backup & Restore",
-      "kimi.title": "KimiClaw",
-      "kimi.desc": "Control OneClaw remotely via Kimi",
-      "kimi.enabled": "Enable",
-      "kimi.getGuide": "Go to kimi.com/bot →",
-      "kimi.guideText": "Click 'Associate existing OpenClaw' → copy command → paste below",
-      "kimi.inputLabel": "Paste BotToken or command (auto parse token)",
-      "kimi.tokenParsed": "Token parsed: ",
-      "kimi.save": "Save",
-      "kimi.saving": "Saving…",
-      "error.noKimiBotToken": "Please paste the command or enter your Bot Token",
-      "search.title": "Search Configuration",
       "search.desc": "Configure web search and content fetch tools",
       "search.enabled": "Enable",
       "search.apiKeyLabel": "API Key",
@@ -353,7 +339,7 @@
       "advanced.cliUninstallDone": "CLI command uninstalled",
       "advanced.cliUnavailable": "CLI action is not available in this app version",
       "advanced.cliOpFailed": "CLI operation failed",
-      "advanced.cliUninstallConfirm": "Uninstall the OneClaw terminal command now?",
+      "advanced.cliUninstallConfirm": "Uninstall the DeadClaw terminal command now?",
       "advanced.clawHubRegistry": "ClawHub Registry",
       "advanced.clawHubRegistryPlaceholder": "https://clawhub.ai",
       "advanced.save": "Save",
@@ -401,7 +387,7 @@
       "nav.about": "Software Update",
       "about.title": "Software Update",
       "about.versionInfo": "Version Information",
-      "about.oneClawVersion": "OneClaw Version",
+      "about.oneClawVersion": "DeadClaw Version",
       "about.openClawVersion": "OpenClaw Version",
       "about.updateTitle": "Software Update",
       "about.checkUpdate": "Check for Updates",
@@ -431,15 +417,13 @@
       "nav.chat": "远程控制",
       "nav.feishu": "飞书集成",
       "chat.title": "远程控制",
-      "chat.desc": "连接微信、飞书、企业微信、钉钉、Kimi 或 QQ，从聊天软件远程控制 OneClaw",
+      "chat.desc": "连接微信、飞书、企业微信、钉钉或 QQ，从聊天软件远程控制 DeadClaw",
       "chat.platformFeishu": "飞书",
       "chat.platformFeishuMeta": "Lark / 飞书机器人",
       "chat.platformWecom": "企业微信",
       "chat.platformWecomMeta": "企业微信智能机器人",
       "chat.platformDingtalk": "钉钉",
       "chat.platformDingtalkMeta": "钉钉 Stream 连接器",
-      "chat.platformKimi": "KimiClaw",
-      "chat.platformKimiMeta": "Kimi 远程机器人",
       "chat.platformQq": "QQ",
       "chat.platformQqMeta": "QQ 开放平台机器人",
       "provider.title": "模型配置",
@@ -531,7 +515,7 @@
       "feishu.approvedRemoved": "已移除授权",
       "feishu.kindUser": "用户",
       "feishu.kindGroup": "群聊",
-      "wecom.desc": "连接企业微信机器人 让用户直接在企业微信里和 OneClaw 对话",
+      "wecom.desc": "连接企业微信机器人 让用户直接在企业微信里和 DeadClaw 对话",
       "wecom.enabled": "启用状态",
       "wecom.botId": "Bot ID",
       "wecom.secret": "Secret",
@@ -544,23 +528,23 @@
       "wecom.groupPolicyDisabled": "不接收群消息",
       "wecom.groupAllowFrom": "群聊白名单",
       "wecom.groupAllowFromHint": "每行一个群 ID。仅在“仅白名单群可访问”模式下生效",
-      "wecom.dmHint": "私聊建议优先使用“先配对再访问”；切到“所有人可直接访问”时 OneClaw 会自动写入 allowFrom=[\"*\"]",
+      "wecom.dmHint": "私聊建议优先使用“先配对再访问”；切到“所有人可直接访问”时 DeadClaw 会自动写入 allowFrom=[\"*\"]",
       "wecom.docs": "插件说明 →",
       "wecom.getKey": "打开企业微信后台 →",
       "wecom.save": "保存",
       "wecom.saving": "保存中…",
-      "dingtalk.desc": "连接钉钉 让用户直接在钉钉里和 OneClaw 对话",
+      "dingtalk.desc": "连接钉钉 让用户直接在钉钉里和 DeadClaw 对话",
       "dingtalk.enabled": "启用状态",
       "dingtalk.clientId": "Client ID / AppKey",
       "dingtalk.clientSecret": "Client Secret / AppSecret",
       "dingtalk.sessionTimeout": "会话超时（毫秒）",
       "dingtalk.sessionTimeoutHint": "默认 1800000 毫秒（30 分钟）",
-      "dingtalk.gatewayHint": "OneClaw会自动复用当前核心服务token并补齐所需的chatCompletions HTTP端点",
+      "dingtalk.gatewayHint": "DeadClaw会自动复用当前核心服务token并补齐所需的chatCompletions HTTP端点",
       "dingtalk.docs": "配置指南 →",
       "dingtalk.getKey": "打开钉钉开放平台 →",
       "dingtalk.save": "保存",
       "dingtalk.saving": "保存中…",
-      "qq.desc": "连接 QQ Bot 让用户直接在 QQ 中和 OneClaw 对话",
+      "qq.desc": "连接 QQ Bot 让用户直接在 QQ 中和 DeadClaw 对话",
       "qq.enabled": "启用状态",
       "qq.appId": "QQ Bot App ID",
       "qq.clientSecret": "Client Secret",
@@ -571,7 +555,7 @@
       "qq.saving": "保存中…",
       "chat.platformWeixin": "微信",
       "chat.platformWeixinMeta": "微信扫码连接",
-      "weixin.desc": "使用微信扫码连接 OneClaw，在微信中直接对话",
+      "weixin.desc": "使用微信扫码连接 DeadClaw，在微信中直接对话",
       "weixin.login": "连接微信",
       "weixin.cancel": "取消",
       "weixin.waitingScan": "使用最新版微信扫码登录",
@@ -580,9 +564,9 @@
       "weixin.loginFailed": "登录失败",
       "weixin.disconnect": "断开连接",
       "weixin.disconnected": "已断开",
-      "weixin.notBundled": "微信插件组件缺失，请重新安装 OneClaw",
+      "weixin.notBundled": "微信插件组件缺失，请重新安装 DeadClaw",
       "weixin.gatewayNotRunning": "Gateway 未运行，请先启动",
-      "error.weixinNotBundled": "微信插件组件缺失，请重新安装 OneClaw",
+      "error.weixinNotBundled": "微信插件组件缺失，请重新安装 DeadClaw",
       "error.noPairingCode": "配对码无效",
       "error.loadPairingFailed": "读取待审批请求失败",
       "error.loadApprovedFailed": "读取已授权列表失败",
@@ -592,35 +576,23 @@
       "error.noAppSecret": "请输入应用密钥",
       "error.noWecomBotId": "请输入企业微信 Bot ID",
       "error.noWecomSecret": "请输入企业微信 Secret",
-      "error.wecomNotBundled": "企业微信插件组件缺失 请重新安装 OneClaw",
+      "error.wecomNotBundled": "企业微信插件组件缺失 请重新安装 DeadClaw",
       "error.noDingtalkClientId": "请输入钉钉 Client ID / AppKey",
       "error.noDingtalkClientSecret": "请输入钉钉 Client Secret / AppSecret",
       "error.invalidDingtalkSessionTimeout": "请输入有效的会话超时毫秒值",
-      "error.dingtalkNotBundled": "钉钉连接器组件缺失 请重新安装 OneClaw",
+      "error.dingtalkNotBundled": "钉钉连接器组件缺失 请重新安装 DeadClaw",
       "error.noQqAppId": "请输入 QQ Bot App ID",
       "error.noQqClientSecret": "请输入 QQ Bot Client Secret",
-      "error.qqNotBundled": "QQ Bot 组件缺失 请重新安装 OneClaw",
+      "error.qqNotBundled": "QQ Bot 组件缺失 请重新安装 DeadClaw",
       "error.noKey": "请输入 API 密钥",
       "error.noBaseUrl": "请输入接口地址",
       "error.noModelId": "请输入模型 ID",
       "error.verifyFailed": "验证失败 请检查 API 密钥",
       "error.connection": "连接错误：",
-      "nav.kimi": "KimiClaw",
       "nav.search": "搜索",
       "nav.memory": "记忆",
       "nav.appearance": "外观",
       "nav.backup": "备份恢复",
-      "kimi.title": "KimiClaw",
-      "kimi.desc": "通过 Kimi 远程遥控 OneClaw",
-      "kimi.enabled": "启用状态",
-      "kimi.getGuide": "前往 kimi.com/bot →",
-      "kimi.guideText": '点击"关联已有 OpenClaw" → 复制命令 → 粘贴到下方输入框',
-      "kimi.inputLabel": "粘贴 BotToken 或命令(自动解析Token)",
-      "kimi.tokenParsed": "解析到 Token：",
-      "kimi.save": "保存",
-      "kimi.saving": "保存中…",
-      "error.noKimiBotToken": "请粘贴命令或输入 Bot Token",
-      "search.title": "搜索配置",
       "search.desc": "配置网页搜索和内容抓取工具",
       "search.enabled": "启用状态",
       "search.apiKeyLabel": "API 密钥",
@@ -660,7 +632,7 @@
       "advanced.cliUninstallDone": "CLI 命令已卸载",
       "advanced.cliUnavailable": "当前应用版本不支持该 CLI 操作",
       "advanced.cliOpFailed": "CLI 操作失败",
-      "advanced.cliUninstallConfirm": "确认要卸载 OneClaw 终端命令吗？",
+      "advanced.cliUninstallConfirm": "确认要卸载 DeadClaw 终端命令吗？",
       "advanced.clawHubRegistry": "ClawHub Registry",
       "advanced.clawHubRegistryPlaceholder": "https://clawhub.ai",
       "advanced.save": "保存",
@@ -708,7 +680,7 @@
       "nav.about": "软件更新",
       "about.title": "软件更新",
       "about.versionInfo": "版本信息",
-      "about.oneClawVersion": "OneClaw 版本",
+      "about.oneClawVersion": "DeadClaw 版本",
       "about.openClawVersion": "OpenClaw 版本",
       "about.updateTitle": "软件更新",
       "about.checkUpdate": "检查更新",
@@ -797,7 +769,6 @@
     feishuStatusDot: $("#feishuStatusDot"),
     wecomStatusDot: $("#wecomStatusDot"),
     dingtalkStatusDot: $("#dingtalkStatusDot"),
-    kimiStatusDot: $("#kimiStatusDot"),
     qqStatusDot: $("#qqStatusDot"),
     // Channels tab
     chEnabled: $("#chEnabled"),
@@ -877,16 +848,6 @@
     btnWeixinRemove: $("#btnWeixinRemove"),
     weixinMsgBox: $("#weixinMsgBox"),
     weixinStatusDot: $("#weixinStatusDot"),
-    // Kimi tab
-    kimiEnabled: $("#kimiEnabled"),
-    kimiFields: $("#kimiFields"),
-    kimiSettingsInput: $("#kimiSettingsInput"),
-    btnToggleKimiToken: $("#btnToggleKimiToken"),
-    kimiMsgBox: $("#kimiMsgBox"),
-    kimiBotPageLink: $("#kimiBotPageLink"),
-    btnKimiSave: $("#btnKimiSave"),
-    btnKimiSaveText: $("#btnKimiSave .btn-text"),
-    btnKimiSaveSpinner: $("#btnKimiSave .btn-spinner"),
     // Search tab
     searchEnabled: $("#searchEnabled"),
     searchFields: $("#searchFields"),
@@ -967,7 +928,6 @@
   let wecomSaving = false;
   let dingtalkSaving = false;
   let qqSaving = false;
-  let kimiSaving = false;
   let searchSaving = false;
   let advSaving = false;
   let cliOperating = false;
@@ -988,7 +948,6 @@
     weixin: "chatPlatformWeixin",
     wecom: "chatPlatformWecom",
     dingtalk: "chatPlatformDingtalk",
-    kimi: "chatPlatformKimi",
     qqbot: "chatPlatformQqbot",
   };
   const TAB_ALIAS_MAP = {
@@ -998,7 +957,6 @@
     wecom: "channels",
     dingtalk: "channels",
     "dingtalk-connector": "channels",
-    kimi: "channels",
     qq: "channels",
     qqbot: "channels",
   };
@@ -1053,8 +1011,9 @@
   // 兼容历史 tab 参数别名，确保外部深链都能落到正确面板。
   function normalizeTabName(tabName) {
     var raw = String(tabName || "").trim();
-    if (!raw) return "provider";
-    return TAB_ALIAS_MAP[raw] || raw;
+    if (!raw) return "channels";
+    var normalized = TAB_ALIAS_MAP[raw] || raw;
+    return normalized === "provider" ? "channels" : normalized;
   }
 
   // 兼容 feishu / dingtalk / qq / qqbot 这类历史入口，把它们映射到远程控制子平台。
@@ -1064,7 +1023,6 @@
     if (raw === "wecom" || raw === "wechat-work" || raw === "wecom-openclaw-plugin") return "wecom";
     if (raw === "dingtalk" || raw === "dingtalk-connector") return "dingtalk";
     if (raw === "qq" || raw === "qqbot") return "qqbot";
-    if (raw === "kimi") return "kimi";
     return "feishu";
   }
 
@@ -1080,7 +1038,6 @@
       raw === "wecom-openclaw-plugin" ||
       raw === "dingtalk" ||
       raw === "dingtalk-connector" ||
-      raw === "kimi" ||
       raw === "qq" ||
       raw === "qqbot"
     ) {
@@ -1123,7 +1080,7 @@
     els.navItems.forEach((item) => {
       if (item.dataset.tab === target) found = true;
     });
-    if (!found) target = "provider";
+    if (!found) target = "channels";
 
     els.navItems.forEach((item) => {
       item.classList.toggle("active", item.dataset.tab === target);
@@ -1208,6 +1165,9 @@
 
   function switchProvider(provider) {
     currentProvider = provider;
+    if (!els.providerTabs || !els.apiKeyInput) {
+      return;
+    }
     const config = PROVIDERS[provider];
 
     $$(".provider-tab").forEach((tab) => {
@@ -3410,120 +3370,6 @@
     requestEmbeddedAppearanceInit();
   }
 
-  // ── Kimi Tab ──
-
-  // 从 install.sh 命令或直接输入解析 bot token
-  function parseBotToken(input) {
-    var match = input.match(/--bot-token\s+(\S+)/);
-    if (match) return match[1];
-    var trimmed = input.trim();
-    if (trimmed && !/\s/.test(trimmed)) return trimmed;
-    return "";
-  }
-
-  // 掩码 token（保留首尾各 4 字符）
-  function maskToken(token) {
-    if (!token || token.length <= 8) return token || "";
-    return token.slice(0, 4) + "..." + token.slice(-4);
-  }
-
-  // Kimi 消息框
-  function showKimiMsg(msg, type) {
-    els.kimiMsgBox.textContent = msg;
-    els.kimiMsgBox.className = "msg-box " + type;
-  }
-
-  function hideKimiMsg() {
-    els.kimiMsgBox.classList.add("hidden");
-    els.kimiMsgBox.textContent = "";
-    els.kimiMsgBox.className = "msg-box hidden";
-  }
-
-  function setKimiSaving(loading) {
-    kimiSaving = loading;
-  }
-
-  // 获取 Kimi 启用/禁用状态
-  function isKimiEnabled() {
-    return els.kimiEnabled.checked;
-  }
-
-  // 加载已有 Kimi 配置
-  async function loadKimiConfig() {
-    try {
-      var result = await window.oneclaw.settingsGetKimiConfig();
-      if (!result.success || !result.data) return;
-
-      var data = result.data;
-      // 回填 token 到输入框
-      // 回填 token
-      if (data.botToken) {
-        els.kimiSettingsInput.value = data.botToken;
-      }
-
-      // 回填启用状态
-      var enabled = data.enabled && data.botToken;
-      els.kimiEnabled.checked = !!enabled;
-
-    } catch (err) {
-      console.error("[Settings] loadKimiConfig failed:", err);
-    }
-  }
-
-  // 保存 Kimi 配置（Gateway 通过 chokidar 监听配置文件变更，自动热重载）
-  async function handleKimiSave() {
-    if (kimiSaving) return;
-
-    var enabled = isKimiEnabled();
-
-    // 禁用 → 直接保存开关状态
-    if (!enabled) {
-      setKimiSaving(true);
-      hideKimiMsg();
-      try {
-        var result = await window.oneclaw.settingsSaveKimiConfig({ enabled: false });
-        setKimiSaving(false);
-        if (result.success) {
-          showToast(t("common.saved"));
-        } else {
-          showKimiMsg(result.message || "Save failed", "error");
-        }
-      } catch (err) {
-        setKimiSaving(false);
-        showKimiMsg(t("error.connection") + (err.message || "Unknown error"), "error");
-      }
-      return;
-    }
-
-    // 启用 → 校验 token
-    var botToken = parseBotToken(els.kimiSettingsInput.value);
-    if (!botToken) {
-      showKimiMsg(t("error.noKimiBotToken"), "error");
-      els.kimiEnabled.checked = false;
-      return;
-    }
-
-    setKimiSaving(true);
-    hideKimiMsg();
-
-    try {
-      var result = await window.oneclaw.settingsSaveKimiConfig({ botToken: botToken, enabled: true });
-      if (!result.success) {
-        showKimiMsg(result.message || "Save failed", "error");
-        els.kimiEnabled.checked = false;
-        setKimiSaving(false);
-        return;
-      }
-
-      setKimiSaving(false);
-      showToast(t("common.saved"));
-    } catch (err) {
-      setKimiSaving(false);
-      els.kimiEnabled.checked = false;
-      showKimiMsg(t("error.connection") + (err.message || "Unknown error"), "error");
-    }
-  }
-
   // ── Search Tab ──
 
   // Search 消息框
@@ -4009,6 +3855,10 @@
         savedProviders = data.savedProviders;
       }
 
+      if (!els.providerTabs || !els.apiKeyInput) {
+        return;
+      }
+
       var provider = data.provider;
       if (!provider || !PROVIDERS[provider]) return;
 
@@ -4169,7 +4019,6 @@
       loadDingtalkConfig(),
       loadQqbotConfig(),
       loadWeixinConfig(),
-      loadKimiConfig(),
       loadSearchConfig(),
       loadAdvancedConfig(),
       loadBackupData(),
@@ -4494,10 +4343,12 @@
     });
 
     // Provider tab 切换
-    els.providerTabs.addEventListener("click", function (e) {
-      var tab = e.target.closest(".provider-tab");
-      if (tab) switchProvider(tab.dataset.provider);
-    });
+    if (els.providerTabs) {
+      els.providerTabs.addEventListener("click", function (e) {
+        var tab = e.target.closest(".provider-tab");
+        if (tab) switchProvider(tab.dataset.provider);
+      });
+    }
 
     // Moonshot 子平台切换
     if (els.subPlatformGroup) {
@@ -4513,24 +4364,32 @@
     }
 
     // Custom 预设切换
-    els.customPreset.addEventListener("change", function () {
-      applyCustomPreset(els.customPreset.value);
-    });
+    if (els.customPreset) {
+      els.customPreset.addEventListener("change", function () {
+        applyCustomPreset(els.customPreset.value);
+      });
+    }
 
     // 模型下拉切换 → 控制自定义模型输入框显隐
-    els.modelSelect.addEventListener("change", handleModelSelectChange);
+    if (els.modelSelect) {
+      els.modelSelect.addEventListener("change", handleModelSelectChange);
+    }
 
     // 平台链接
-    els.platformLink.addEventListener("click", function (e) {
-      e.preventDefault();
-      var url = els.platformLink.dataset.url;
-      if (url && window.oneclaw && window.oneclaw.openExternal) {
-        window.oneclaw.openExternal(url);
-      }
-    });
+    if (els.platformLink) {
+      els.platformLink.addEventListener("click", function (e) {
+        e.preventDefault();
+        var url = els.platformLink.dataset.url;
+        if (url && window.oneclaw && window.oneclaw.openExternal) {
+          window.oneclaw.openExternal(url);
+        }
+      });
+    }
 
     // 密码可见性
-    els.btnOAuth.addEventListener("click", handleOAuthLogin);
+    if (els.btnOAuth) {
+      els.btnOAuth.addEventListener("click", handleOAuthLogin);
+    }
     if (els.btnOAuthCancel) {
       els.btnOAuthCancel.addEventListener("click", handleOAuthCancel);
     }
@@ -4540,7 +4399,9 @@
     if (els.btnUsageRefresh) {
       els.btnUsageRefresh.addEventListener("click", loadUsage);
     }
-    els.btnToggleKey.addEventListener("click", togglePasswordVisibility);
+    if (els.btnToggleKey) {
+      els.btnToggleKey.addEventListener("click", togglePasswordVisibility);
+    }
 
     // 模型列表：新增按钮
     if (els.addModelBtn) {
@@ -4548,18 +4409,21 @@
     }
     // 模型列表：删除按钮
     // 保存
-    els.btnSave.addEventListener("click", handleSave);
+    if (els.btnSave) {
+      els.btnSave.addEventListener("click", handleSave);
+    }
 
     // Enter 键保存
-    els.apiKeyInput.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") handleSave();
-    });
+    if (els.apiKeyInput) {
+      els.apiKeyInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") handleSave();
+      });
+    }
 
     // 通道启用指示灯绑定
     bindStatusDot(els.chEnabled, els.feishuStatusDot);
     bindStatusDot(els.wecomEnabled, els.wecomStatusDot);
     bindStatusDot(els.dingtalkEnabled, els.dingtalkStatusDot);
-    bindStatusDot(els.kimiEnabled, els.kimiStatusDot);
     bindStatusDot(els.qqEnabled, els.qqStatusDot);
     bindStatusDot(els.weixinEnabled, els.weixinStatusDot);
 
@@ -4825,24 +4689,6 @@
         removeWeixinAccount();
       });
     }
-    // Kimi tab — 启用/禁用切换 + Token 可见性
-    els.kimiEnabled.addEventListener("change", function () { handleKimiSave(); });
-    els.btnToggleKimiToken.addEventListener("click", togglePasswordVisibility);
-    els.kimiSettingsInput.addEventListener("input", function () {
-      var raw = els.kimiSettingsInput.value;
-      var token = parseBotToken(raw);
-      // 从命令格式中提取到 token → 替换输入框 + toast 提示
-      if (token && raw.indexOf("--bot-token") !== -1 && raw !== token) {
-        els.kimiSettingsInput.value = token;
-        showToast(t("kimi.tokenParsed") + maskToken(token));
-      }
-    });
-    els.kimiBotPageLink.addEventListener("click", function (e) {
-      e.preventDefault();
-      if (window.oneclaw && window.oneclaw.openExternal) {
-        window.oneclaw.openExternal("https://www.kimi.com/bot?utm_source=oneclaw");
-      }
-    });
 
     // Search tab — 启用/禁用切换 + Key 可见性 + 平台链接
     els.searchEnabled.addEventListener("change", function () { toggleEl(els.searchFields, isSearchEnabled()); });
@@ -5027,8 +4873,7 @@
     initFixedTooltip();
 
     bindEvents();
-    switchProvider("moonshot");
-    switchTab(initialTab || "provider");
+    switchTab(initialTab || "channels");
     switchChatPlatform(initialChatPlatform || "feishu");
     applyRecoveryNotice(startupNotice);
     loadCurrentConfig();
@@ -5038,7 +4883,6 @@
     loadDingtalkConfig();
     loadQqbotConfig();
     loadWeixinConfig();
-    loadKimiConfig();
     loadSearchConfig();
     loadMemoryConfig();
     loadAdvancedConfig();

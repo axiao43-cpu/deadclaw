@@ -17,6 +17,7 @@ export type SidebarProps = {
   skillsActive: boolean;
   workspaceActive: boolean;
   cronActive: boolean;
+  apiKeyActive: boolean;
   cronJobCount: number;
   onOpenCron: () => void;
   updateStatus: "hidden" | "available" | "downloading";
@@ -33,7 +34,7 @@ export type SidebarProps = {
   onOpenSkillStore: () => void;
   onOpenWorkspace: () => void;
   onOpenWebUI: () => void;
-  onOpenDocs: () => void;
+  onOpenApiKey: () => void;
   errors: string[];
   onApplyUpdate: () => void;
   onReconnect: () => void;
@@ -253,9 +254,9 @@ export function renderSidebar(props: SidebarProps) {
         </button>
 
         <button
-          class="oneclaw-sidebar__item"
+          class="oneclaw-sidebar__item ${props.apiKeyActive ? "active" : ""}"
           type="button"
-          @click=${props.onOpenDocs}
+          @click=${props.onOpenApiKey}
           data-tooltip=${t("sidebar.docs")}
         >
           <span class="oneclaw-sidebar__icon">${icons.book}</span>
