@@ -29,6 +29,7 @@ jobs:
           path: |
             out/darwin-arm64/*.dmg
             out/darwin-arm64/*.zip
+            out/darwin-arm64/latest-mac.yml
 
   build-mac-x64:
     runs-on: macos-14
@@ -54,6 +55,7 @@ jobs:
           path: |
             out/darwin-x64/*.dmg
             out/darwin-x64/*.zip
+            out/darwin-x64/latest-mac.yml
 
   build-win-x64:
     runs-on: windows-latest
@@ -141,7 +143,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: win-arm64
-          path: release
+          path: out/win32-arm64
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装合并脚本依赖
+        run: npm ci
+
+      - name: 合并更新元数据
+        run: node scripts/merge-release-yml.js
+
+      - name: 汇总 Release 文件
+        run: |
+          mkdir -p release
+          cp -f out/release/* release/
 
       - name: 列出产物
         run: ls -lh release/
