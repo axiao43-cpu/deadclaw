@@ -10,23 +10,12 @@ on:
 env:
   CDN_DOMAIN: oneclaw.cn
   SHARE_COPY_OBJECT_KEY: config/share-copy-content.json
-  TOS_ENDPOINT: https://tos-s3-accelerate.volces.com
-  TOS_BUCKET: oneclaw-cn
-  AWS_ACCESS_KEY_ID: ${{ secrets.VOLCENGINE_ACCESS_KEY }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.VOLCENGINE_SECRET_KEY }}
-  AWS_DEFAULT_REGION: cn-beijing
-  VOLCENGINE_ACCESS_KEY: ${{ secrets.VOLCENGINE_ACCESS_KEY }}
-  VOLCENGINE_SECRET_KEY: ${{ secrets.VOLCENGINE_SECRET_KEY }}
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
+      - uses: actions/checkout@v4
 
       - name: 校验分享文案 JSON
         run: |
@@ -57,14 +46,30 @@ jobs:
             }
           '
 
-      - name: 上传分享文案到 TOS
+      - name: 安装 ossutil
+        run: curl -fsSL https://gosspublic.alicdn.com/ossutil/install.sh | sudo bash
+
+      - name: 上传分享文案到 OSS
+        env:
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
         run: |
-          aws configure set default.s3.addressing_style virtual
-          aws s3 cp settings/share-copy-content.json "s3://$TOS_BUCKET/${{ env.SHARE_COPY_OBJECT_KEY }}" --endpoint-url "$TOS_ENDPOINT"
+          ossutil config -e oss-cn-beijing.aliyuncs.com -i "$ALIYUN_ACCESS_KEY_ID" -k "$ALIYUN_ACCESS_KEY_SECRET"
+          ossutil cp settings/share-copy-content.json "oss://oneclaw/${{ env.SHARE_COPY_OBJECT_KEY }}" --force
           echo "share-copy-content.json 上传完成"
 
       - name: 刷新 CDN 缓存
+        env:
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
         run: |
-          node scripts/volcengine-cdn-refresh.js \
-            "https://${{ env.CDN_DOMAIN }}/${{ env.SHARE_COPY_OBJECT_KEY }}"
+          curl -fsSL https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz | tar xz
+          chmod +x aliyun
+          ./aliyun configure set \
+            --access-key-id "$ALIYUN_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIYUN_ACCESS_KEY_SECRET" \
+            --region cn-beijing
+          ./aliyun cdn RefreshObjectCaches \
+            --ObjectType File \
+            --ObjectPath "https://${{ env.CDN_DOMAIN }}/${{ env.SHARE_COPY_OBJECT_KEY }}"
           echo "CDN 刷新已提交"

@@ -12,6 +12,7 @@
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
+const zlib = require("zlib");
 const { execSync } = require("child_process");
 const {
   normalizeSemverText,
@@ -29,7 +30,6 @@ const KIMI_SEARCH_CACHE_FILE = "openclaw-kimi-search-0.1.2.tgz";
 const QQBOT_PACKAGE_NAME = "@sliverp/qqbot";
 const DINGTALK_CONNECTOR_PACKAGE_NAME = "@dingtalk-real-ai/dingtalk-connector";
 const WECOM_PLUGIN_PACKAGE_NAME = "@wecom/wecom-openclaw-plugin";
-const WEIXIN_PLUGIN_PACKAGE_NAME = "@tencent-weixin/openclaw-weixin";
 
 // 计算目标产物的唯一标识
 function getTargetId(platform, arch) {
@@ -46,7 +46,7 @@ function getTargetPaths(platform, arch) {
     runtimeDir: path.join(targetBase, "runtime"),
     gatewayDir: path.join(targetBase, "gateway"),
     iconPath: path.join(targetBase, "app-icon.png"),
-    buildConfigPath: path.join(targetBase, "build-config.json"),
+    analyticsConfigPath: path.join(targetBase, "analytics-config.json"),
   };
 }
 
@@ -57,7 +57,6 @@ function parseArgs() {
     platform: process.platform,
     arch: process.platform === "win32" ? "x64" : "arm64",
     locale: "en",
-    asar: process.env.ONECLAW_GATEWAY_ASAR === "1",
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -65,8 +64,6 @@ function parseArgs() {
       opts.platform = args[++i];
     } else if (args[i] === "--arch" && args[i + 1]) {
       opts.arch = args[++i];
-    } else if (args[i] === "--asar") {
-      opts.asar = true;
     }
   }
 
@@ -96,10 +93,109 @@ function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
-// 递归删除目录
+// 递归删除目录（带重试机制 + 重命名技巧，彻底解决 Windows 文件锁定问题）
 function rmDir(dir) {
-  if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+  if (!fs.existsSync(dir)) {
+    return;
+  }
+
+  const maxRetries = 10;
+  const retryDelayMs = 1000;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // 尝试直接删除
+      fs.rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const isBusyError = err.code === "EBUSY" || err.code === "ENOTEMPTY" || err.code === "EPERM";
+      const isLastAttempt = attempt === maxRetries;
+
+      if (!isBusyError) {
+        throw err;
+      }
+
+      if (isLastAttempt) {
+        // 最后一次尝试：使用重命名技巧绕过文件锁定
+        try {
+          const tempDir = `${dir}_delete_${Date.now()}_${process.pid}`;
+          fs.renameSync(dir, tempDir);
+          // 重命名成功后，删除重命名的目录（后台操作，不等待）
+          try {
+            fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 0 });
+          } catch {
+            // 忽略删除失败，反正已经重命名移走了
+          }
+          return;
+        } catch (renameErr) {
+          // 重命名也失败了，抛出原始错误
+          throw err;
+        }
+      }
+
+      // Windows 文件锁定，等待后重试
+      const message = err.code === "EBUSY"
+          ? `文件被占用，等待 ${retryDelayMs}ms 后重试 (${attempt}/${maxRetries})`
+          : `目录非空，等待 ${retryDelayMs}ms 后重试 (${attempt}/${maxRetries})`;
+
+      if (attempt === 1) {
+        // 只在第一次重试时打印消息，避免刷屏
+        console.log(`  [提示] ${message}`);
+      }
+
+      // 同步延迟（使用同步方式避免异步复杂度）
+      const start = Date.now();
+      while (Date.now() - start < retryDelayMs) {
+        // 忙等待（在构建脚本中可以接受）
+      }
+    }
+  }
+}
+
+// 带重试机制的 npm install（应对 Windows 文件锁定）
+function npmInstallWithRetry(cwd, opts) {
+  const maxRetries = 5;
+  const retryDelayMs = 2000;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      execSync(
+          `npm install --omit=dev --install-links --legacy-peer-deps --os=${opts.platform} --cpu=${opts.arch}`,
+          {
+            cwd,
+            stdio: "inherit",
+            env: {
+              ...process.env,
+              NODE_ENV: "production",
+              npm_config_os: opts.platform,
+              npm_config_cpu: opts.arch,
+              NODE_LLAMA_CPP_SKIP_DOWNLOAD: "true",
+              // npm 配置选项，增加容错性
+              npm_config_fetch_retries: "5",
+              npm_config_fetch_retry_factor: "2",
+              npm_config_fetch_retry_mintimeout: "10000",
+              npm_config_fetch_retry_maxtimeout: "60000",
+              npm_config_registry: opts.registry || process.env.npm_config_registry || undefined,
+            },
+          }
+      );
+      return; // 成功则退出
+    } catch (err) {
+      const isLastAttempt = attempt === maxRetries;
+
+      if (isLastAttempt) {
+        throw err; // 最后一次尝试失败，抛出错误
+      }
+
+      console.log(`  [提示] npm install 遇到文件锁定，等待 ${retryDelayMs}ms 后重试 (${attempt}/${maxRetries})`);
+      console.log(`  [提示] 如果 IDE/编辑器正在打开项目目录，请先关闭以避免文件锁定`);
+
+      // 同步延迟
+      const start = Date.now();
+      while (Date.now() - start < retryDelayMs) {
+        // 忙等待
+      }
+    }
   }
 }
 
@@ -112,27 +208,99 @@ function safeUnlink(filePath) {
   }
 }
 
+// 跨平台 tar.gz 解压（使用 Node.js 原生 zlib，避免 tar 命令兼容性问题）
+function extractTarGz(archivePath, destDir) {
+  ensureDir(destDir);
+
+  // 读取并解压 gzip
+  const gzipData = fs.readFileSync(archivePath);
+  const tarData = zlib.gunzipSync(gzipData);
+
+  // 解析 tar 格式并提取文件
+  let offset = 0;
+  const headerSize = 512;
+
+  while (offset < tarData.length) {
+    const header = tarData.slice(offset, offset + headerSize);
+    offset += headerSize;
+
+    // 检查是否到达结束标记（全零块）
+    if (header.every((byte) => byte === 0)) {
+      // 再检查一个全零块（tar 结尾有两个全零块）
+      const nextHeader = tarData.slice(offset, offset + headerSize);
+      if (nextHeader.every((byte) => byte === 0)) {
+        break;
+      }
+    }
+
+    // 解析文件名
+    const name = header.toString("ascii", 0, 100).split("\0")[0];
+    if (!name) break;
+
+    // 解析文件大小
+    const sizeStr = header.toString("ascii", 124, 136).split("\0")[0];
+    const size = parseInt(sizeStr, 8);
+
+    // 解析文件类型
+    const typeFlag = header[156];
+
+    // 跳过常规文件和目录
+    if (typeFlag === 0 || typeFlag === 48) {
+      // 常规文件
+      const data = tarData.slice(offset, offset + size);
+      const outputPath = path.join(destDir, name);
+
+      // 确保父目录存在
+      const outputDir = path.dirname(outputPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+
+      // 写入文件
+      fs.writeFileSync(outputPath, data);
+
+      offset += size;
+      // 跳到下一个 512 字节边界
+      const padding = (512 - (size % 512)) % 512;
+      offset += padding;
+    } else if (typeFlag === 53) {
+      // 目录
+      const dirPath = path.join(destDir, name);
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+    } else {
+      // 跳过其他类型（符号链接、设备文件等）
+      if (typeFlag === 0 || typeFlag === 48) {
+        offset += size;
+        const padding = (512 - (size % 512)) % 512;
+        offset += padding;
+      }
+    }
+  }
+}
+
 // HTTPS GET，返回 Promise<Buffer>
 function httpGet(url) {
   return new Promise((resolve, reject) => {
     const request = (url) => {
       https
-        .get(url, (res) => {
-          // 处理重定向
-          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            request(res.headers.location);
-            return;
-          }
-          if (res.statusCode !== 200) {
-            reject(new Error(`HTTP ${res.statusCode} — ${url}`));
-            return;
-          }
-          const chunks = [];
-          res.on("data", (chunk) => chunks.push(chunk));
-          res.on("end", () => resolve(Buffer.concat(chunks)));
-          res.on("error", reject);
-        })
-        .on("error", reject);
+          .get(url, (res) => {
+            // 处理重定向
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              request(res.headers.location);
+              return;
+            }
+            if (res.statusCode !== 200) {
+              reject(new Error(`HTTP ${res.statusCode} — ${url}`));
+              return;
+            }
+            const chunks = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () => resolve(Buffer.concat(chunks)));
+            res.on("error", reject);
+          })
+          .on("error", reject);
     };
     request(url);
   });
@@ -143,63 +311,63 @@ function downloadFile(url, dest) {
   return new Promise((resolve, reject) => {
     const request = (url) => {
       https
-        .get(url, (res) => {
-          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            request(res.headers.location);
-            return;
-          }
-          if (res.statusCode !== 200) {
-            reject(new Error(`HTTP ${res.statusCode} — ${url}`));
-            return;
-          }
-
-          const totalBytes = parseInt(res.headers["content-length"], 10) || 0;
-          let downloaded = 0;
-          const file = fs.createWriteStream(dest);
-          let settled = false;
-
-          res.on("data", (chunk) => {
-            downloaded += chunk.length;
-            if (totalBytes > 0) {
-              const pct = ((downloaded / totalBytes) * 100).toFixed(1);
-              const mb = (downloaded / 1024 / 1024).toFixed(1);
-              process.stdout.write(`\r  下载进度: ${mb} MB (${pct}%)`);
+          .get(url, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              request(res.headers.location);
+              return;
             }
-          });
+            if (res.statusCode !== 200) {
+              reject(new Error(`HTTP ${res.statusCode} — ${url}`));
+              return;
+            }
 
-          const fail = (err) => {
-            if (settled) return;
-            settled = true;
-            res.destroy();
-            file.destroy();
-            safeUnlink(dest);
-            reject(err);
-          };
+            const totalBytes = parseInt(res.headers["content-length"], 10) || 0;
+            let downloaded = 0;
+            const file = fs.createWriteStream(dest);
+            let settled = false;
 
-          res.on("error", fail);
-          file.on("error", fail);
+            res.on("data", (chunk) => {
+              downloaded += chunk.length;
+              if (totalBytes > 0) {
+                const pct = ((downloaded / totalBytes) * 100).toFixed(1);
+                const mb = (downloaded / 1024 / 1024).toFixed(1);
+                process.stdout.write(`\r  下载进度: ${mb} MB (${pct}%)`);
+              }
+            });
 
-          // 确保写入句柄真正 flush + close 后再返回，避免拿到半截压缩包
-          file.on("finish", () => {
-            file.close((closeErr) => {
+            const fail = (err) => {
               if (settled) return;
               settled = true;
-              if (closeErr) {
-                safeUnlink(dest);
-                reject(closeErr);
-                return;
-              }
-              if (totalBytes > 0) process.stdout.write("\n");
-              resolve();
-            });
-          });
+              res.destroy();
+              file.destroy();
+              safeUnlink(dest);
+              reject(err);
+            };
 
-          res.pipe(file);
-        })
-        .on("error", (err) => {
-          safeUnlink(dest);
-          reject(err);
-        });
+            res.on("error", fail);
+            file.on("error", fail);
+
+            // 确保写入句柄真正 flush + close 后再返回，避免拿到半截压缩包
+            file.on("finish", () => {
+              file.close((closeErr) => {
+                if (settled) return;
+                settled = true;
+                if (closeErr) {
+                  safeUnlink(dest);
+                  reject(closeErr);
+                  return;
+                }
+                if (totalBytes > 0) process.stdout.write("\n");
+                resolve();
+              });
+            });
+
+            res.pipe(file);
+          })
+          .on("error", (err) => {
+            safeUnlink(dest);
+            reject(err);
+          });
     };
     request(url);
   });
@@ -354,7 +522,8 @@ function extractDarwin(tarPath, runtimeDir, version, arch, targetId) {
   // 创建临时解压目录
   const tmpDir = createExtractTmpDir(path.dirname(tarPath), targetId);
 
-  execSync(`tar xzf "${tarPath}" -C "${tmpDir}"`, { stdio: "inherit" });
+  // 使用跨平台 Node.js 原生解压
+  extractTarGz(tarPath, tmpDir);
 
   const srcBase = path.join(tmpDir, prefix);
 
@@ -363,12 +532,12 @@ function extractDarwin(tarPath, runtimeDir, version, arch, targetId) {
 
   // 生成 npm/npx 包装脚本（原始 bin/npm 是符号链接，路径解析不正确）
   fs.writeFileSync(
-    path.join(runtimeDir, "npm"),
-    '#!/bin/sh\ndir="$(cd "$(dirname "$0")" && pwd)"\n"$dir/node" "$dir/vendor/npm/bin/npm-cli.js" "$@"\n'
+      path.join(runtimeDir, "npm"),
+      '#!/bin/sh\ndir="$(cd "$(dirname "$0")" && pwd)"\n"$dir/node" "$dir/vendor/npm/bin/npm-cli.js" "$@"\n'
   );
   fs.writeFileSync(
-    path.join(runtimeDir, "npx"),
-    '#!/bin/sh\ndir="$(cd "$(dirname "$0")" && pwd)"\n"$dir/node" "$dir/vendor/npm/bin/npx-cli.js" "$@"\n'
+      path.join(runtimeDir, "npx"),
+      '#!/bin/sh\ndir="$(cd "$(dirname "$0")" && pwd)"\n"$dir/node" "$dir/vendor/npm/bin/npx-cli.js" "$@"\n'
   );
 
 
@@ -399,8 +568,8 @@ function extractWin32(zipPath, runtimeDir, version, arch, targetId) {
   // 判断宿主平台选择解压方式
   if (process.platform === "win32") {
     execSync(
-      `powershell -NoProfile -Command "Expand-Archive -Force -Path '${zipPath}' -DestinationPath '${tmpDir}'"`,
-      { stdio: "inherit" }
+        `powershell -NoProfile -Command "Expand-Archive -Force -Path '${zipPath}' -DestinationPath '${tmpDir}'"`,
+        { stdio: "inherit" }
     );
   } else {
     // 非 Windows 宿主（交叉打包场景），用 unzip
@@ -444,12 +613,13 @@ function copyDirSync(src, dest) {
 function writeNpmrc(runtimeDir) {
   const npmrcPath = path.join(runtimeDir, ".npmrc");
   const content = [
-    "registry=https://registry.npmmirror.com",
-    "disturl=https://npmmirror.com/mirrors/node",
+    "registry=https://registry.npmjs.org/",
+    "disturl=https://nodejs.org/dist",
+    "electron_builder_binaries_mirror=https://github.com/electron-userland/electron-builder-binaries/releases/download/",
     "",
   ].join("\n");
   fs.writeFileSync(npmrcPath, content);
-  log("已写入 .npmrc（使用 npmmirror 镜像源）");
+  log("已写入 .npmrc（使用官方 npm 源）");
 }
 
 // ─── Step 1.8: 生成埋点配置（由打包环境动态注入） ───
@@ -470,9 +640,9 @@ function readEnvRetryDelays(name, fallback) {
   const raw = readEnvText(name);
   if (!raw) return [...fallback];
   const delays = raw
-    .split(",")
-    .map((item) => Number.parseInt(item.trim(), 10))
-    .filter((value) => Number.isFinite(value) && value >= 0);
+      .split(",")
+      .map((item) => Number.parseInt(item.trim(), 10))
+      .filter((value) => Number.isFinite(value) && value >= 0);
   return delays.length > 0 ? delays : [...fallback];
 }
 
@@ -505,19 +675,17 @@ function buildAnalyticsConfig() {
   };
 }
 
-function writeBuildConfig(configPath) {
-  const analytics = buildAnalyticsConfig();
-  const clawhubRegistry = readEnvText("ONECLAW_CLAWHUB_REGISTRY");
-  const config = { analytics, clawhubRegistry };
+function writeAnalyticsConfig(configPath) {
+  const config = buildAnalyticsConfig();
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  log(`已生成 build-config.json（analytics.enabled=${analytics.enabled ? "true" : "false"}, clawhubRegistry=${clawhubRegistry || "(空)"}）`);
+  log(`已生成 analytics-config.json（enabled=${config.enabled ? "true" : "false"}）`);
 }
 
 // ─── Step 2: 安装 openclaw 生产依赖 ───
 
 // 确定 openclaw 安装来源：查询 npm latest stable
 function getPackageSource() {
-  // 优先级 1: 环境变量覆盖（调试/测试用逃生舱）
+  // 显式覆盖（调试/测试用逃生舱）
   const explicitSource = readEnvText("OPENCLAW_PACKAGE_SOURCE");
   if (explicitSource) {
     log(`使用 OPENCLAW_PACKAGE_SOURCE 指定来源: ${explicitSource}`);
@@ -527,23 +695,7 @@ function getPackageSource() {
     };
   }
 
-  // 优先级 2: package.json oneclaw.openclaw 字段（git-tracked 单一事实来源）
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
-    const pinnedVersion = pkg.oneclaw?.openclaw;
-    if (pinnedVersion) {
-      log(`使用 openclaw@${pinnedVersion}（来源: package.json oneclaw.openclaw）`);
-      return {
-        source: pinnedVersion,
-        stampSource: `pinned:openclaw@${pinnedVersion}`,
-      };
-    }
-  } catch {
-    // package.json 读取失败，继续 fallback
-  }
-
-  // 优先级 3: npm latest（带警告）
-  log("⚠️  未在 package.json oneclaw.openclaw 中锁定版本，将使用 npm latest");
+  // 查询 npm registry 获取 openclaw latest 版本
   const latestVersion = readRemoteLatestVersion("openclaw", {
     cwd: ROOT,
     env: process.env,
@@ -553,7 +705,7 @@ function getPackageSource() {
   });
 
   if (!latestVersion) {
-    die("无法从 npm 获取 openclaw 最新版本（检查网络或在 package.json oneclaw.openclaw 中指定版本）");
+    die("无法从 npm 获取 openclaw 最新版本（检查网络或设置 OPENCLAW_PACKAGE_SOURCE 手动指定）");
   }
 
   log(`使用 openclaw@${latestVersion}（来源: npm latest）`);
@@ -563,46 +715,97 @@ function getPackageSource() {
   };
 }
 
-// 通用插件版本解析：env 覆盖 → package.json oneclaw.{key} pin → npm latest
-function resolveBundledPluginSource({ packageName, envKey, pkgJsonKey }) {
-  const explicitSource = readEnvText(envKey);
-  if (explicitSource) {
-    log(`使用 ${envKey} 指定来源: ${explicitSource}`);
-    return { source: explicitSource, stampSource: `explicit:${packageName}@${explicitSource}` };
-  }
-
-  if (pkgJsonKey) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
-      const pinned = pkg.oneclaw?.[pkgJsonKey];
-      if (pinned) {
-        log(`使用 ${packageName}@${pinned}（来源: package.json oneclaw.${pkgJsonKey}）`);
-        return { source: pinned, stampSource: `pinned:${packageName}@${pinned}` };
-      }
-    } catch {}
-  }
-
-  const latestVersion = readRemoteLatestVersion(packageName, {
-    cwd: ROOT, env: process.env, logError(message) { log(message); },
-  });
-  if (!latestVersion) {
-    die(`无法从 npm 获取 ${packageName} 最新版本（检查网络或设置 ${envKey} 手动指定）`);
-  }
-  log(`使用 ${packageName}@${latestVersion}（来源: npm latest）`);
-  return { source: latestVersion, stampSource: `remote:${packageName}@${latestVersion}` };
-}
-
+// 确定 QQ Bot 插件安装来源：查询 npm latest stable
 function getQqbotPackageSource() {
-  return resolveBundledPluginSource({ packageName: QQBOT_PACKAGE_NAME, envKey: "ONECLAW_QQBOT_PACKAGE_SOURCE", pkgJsonKey: "qqbot" });
+  // 显式覆盖（调试 / 私有 tgz / 本地 file: 逃生舱）
+  const explicitSource = readEnvText("ONECLAW_QQBOT_PACKAGE_SOURCE");
+  if (explicitSource) {
+    log(`使用 ONECLAW_QQBOT_PACKAGE_SOURCE 指定来源: ${explicitSource}`);
+    return {
+      source: explicitSource,
+      stampSource: `explicit:${QQBOT_PACKAGE_NAME}@${explicitSource}`,
+    };
+  }
+
+  const latestVersion = readRemoteLatestVersion(QQBOT_PACKAGE_NAME, {
+    cwd: ROOT,
+    env: process.env,
+    logError(message) {
+      log(message);
+    },
+  });
+
+  if (!latestVersion) {
+    die(`无法从 npm 获取 ${QQBOT_PACKAGE_NAME} 最新版本（检查网络或设置 ONECLAW_QQBOT_PACKAGE_SOURCE 手动指定）`);
+  }
+
+  log(`使用 ${QQBOT_PACKAGE_NAME}@${latestVersion}（来源: npm latest）`);
+  return {
+    source: latestVersion,
+    stampSource: `remote:${QQBOT_PACKAGE_NAME}@${latestVersion}`,
+  };
 }
+
+// 确定钉钉连接器安装来源：查询 npm latest stable
 function getDingtalkConnectorPackageSource() {
-  return resolveBundledPluginSource({ packageName: DINGTALK_CONNECTOR_PACKAGE_NAME, envKey: "ONECLAW_DINGTALK_CONNECTOR_PACKAGE_SOURCE", pkgJsonKey: "dingtalkConnector" });
+  // 显式覆盖（调试 / 私有 tgz / 本地 file: 逃生舱）
+  const explicitSource = readEnvText("ONECLAW_DINGTALK_CONNECTOR_PACKAGE_SOURCE");
+  if (explicitSource) {
+    log(`使用 ONECLAW_DINGTALK_CONNECTOR_PACKAGE_SOURCE 指定来源: ${explicitSource}`);
+    return {
+      source: explicitSource,
+      stampSource: `explicit:${DINGTALK_CONNECTOR_PACKAGE_NAME}@${explicitSource}`,
+    };
+  }
+
+  const latestVersion = readRemoteLatestVersion(DINGTALK_CONNECTOR_PACKAGE_NAME, {
+    cwd: ROOT,
+    env: process.env,
+    logError(message) {
+      log(message);
+    },
+  });
+
+  if (!latestVersion) {
+    die(`无法从 npm 获取 ${DINGTALK_CONNECTOR_PACKAGE_NAME} 最新版本（检查网络或设置 ONECLAW_DINGTALK_CONNECTOR_PACKAGE_SOURCE 手动指定）`);
+  }
+
+  log(`使用 ${DINGTALK_CONNECTOR_PACKAGE_NAME}@${latestVersion}（来源: npm latest）`);
+  return {
+    source: latestVersion,
+    stampSource: `remote:${DINGTALK_CONNECTOR_PACKAGE_NAME}@${latestVersion}`,
+  };
 }
+
+// 确定企业微信插件安装来源：查询 npm latest stable
 function getWecomPluginPackageSource() {
-  return resolveBundledPluginSource({ packageName: WECOM_PLUGIN_PACKAGE_NAME, envKey: "ONECLAW_WECOM_PLUGIN_PACKAGE_SOURCE", pkgJsonKey: "wecom" });
-}
-function getWeixinPluginPackageSource() {
-  return resolveBundledPluginSource({ packageName: WEIXIN_PLUGIN_PACKAGE_NAME, envKey: "ONECLAW_WEIXIN_PLUGIN_PACKAGE_SOURCE", pkgJsonKey: "weixin" });
+  // 显式覆盖（调试 / 私有 tgz / 本地 file: 逃生舱）
+  const explicitSource = readEnvText("ONECLAW_WECOM_PLUGIN_PACKAGE_SOURCE");
+  if (explicitSource) {
+    log(`使用 ONECLAW_WECOM_PLUGIN_PACKAGE_SOURCE 指定来源: ${explicitSource}`);
+    return {
+      source: explicitSource,
+      stampSource: `explicit:${WECOM_PLUGIN_PACKAGE_NAME}@${explicitSource}`,
+    };
+  }
+
+  const latestVersion = readRemoteLatestVersion(WECOM_PLUGIN_PACKAGE_NAME, {
+    cwd: ROOT,
+    env: process.env,
+    logError(message) {
+      log(message);
+    },
+  });
+
+  if (!latestVersion) {
+    die(`无法从 npm 获取 ${WECOM_PLUGIN_PACKAGE_NAME} 最新版本（检查网络或设置 ONECLAW_WECOM_PLUGIN_PACKAGE_SOURCE 手动指定）`);
+  }
+
+  log(`使用 ${WECOM_PLUGIN_PACKAGE_NAME}@${latestVersion}（来源: npm latest）`);
+  return {
+    source: latestVersion,
+    stampSource: `remote:${WECOM_PLUGIN_PACKAGE_NAME}@${latestVersion}`,
+  };
 }
 
 // 读取 gateway 依赖平台戳
@@ -628,8 +831,8 @@ const NATIVE_NAME_PREFIX = [
 // 收集 node_modules 第一层包（含 @scope 下子包）
 function collectTopLevelPackages(nmDir) {
   const scopedDirs = fs.existsSync(nmDir)
-    ? fs.readdirSync(nmDir, { withFileTypes: true })
-    : [];
+      ? fs.readdirSync(nmDir, { withFileTypes: true })
+      : [];
 
   const packages = [];
   for (const entry of scopedDirs) {
@@ -709,26 +912,24 @@ function pruneLlamaPackages(nmDir) {
   }
 }
 
-// 移除 @ffmpeg-installer / @ffprobe-installer 预编译二进制（各 35-80MB），视频缩略图功能降级但不崩溃
+// 移除 @ffmpeg-installer 预编译二进制（35-68MB），视频缩略图功能降级但不崩溃
 function pruneFFmpegBinaries(nmDir) {
-  for (const scope of ["@ffmpeg-installer", "@ffprobe-installer"]) {
-    const dir = path.join(nmDir, scope);
-    if (!fs.existsSync(dir)) continue;
+  const ffmpegDir = path.join(nmDir, "@ffmpeg-installer");
+  if (!fs.existsSync(ffmpegDir)) return;
 
-    const sizeBefore = fs.readdirSync(dir, { withFileTypes: true })
+  const sizeBefore = fs.readdirSync(ffmpegDir, { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .reduce((sum, e) => {
-        const d = path.join(dir, e.name);
+        const dir = path.join(ffmpegDir, e.name);
         try {
-          const stat = fs.statSync(d);
-          return sum + (stat.isDirectory() ? getDirSize(d) : 0);
+          const stat = fs.statSync(dir);
+          return sum + (stat.isDirectory() ? getDirSize(dir) : 0);
         } catch { return sum; }
       }, 0);
 
-    rmDir(dir);
-    const savedMB = (sizeBefore / 1048576).toFixed(1);
-    log(`已移除 ${scope} 预编译二进制 (${savedMB} MB)`);
-  }
+  rmDir(ffmpegDir);
+  const savedMB = (sizeBefore / 1048576).toFixed(1);
+  log(`已移除 @ffmpeg-installer 预编译二进制 (${savedMB} MB)`);
 }
 
 // 递归计算目录大小
@@ -749,7 +950,7 @@ function prunePdfParseRedundantVersions(nmDir) {
   let entries;
   try {
     entries = fs.readdirSync(pdfJsDir, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && e.name.startsWith("v"));
+        .filter((e) => e.isDirectory() && e.name.startsWith("v"));
   } catch { return; }
 
   if (entries.length <= 1) return;
@@ -772,28 +973,6 @@ function prunePdfParseRedundantVersions(nmDir) {
   }
   const savedMB = (savedBytes / 1048576).toFixed(1);
   log(`已移除 pdf-parse 冗余 pdf.js 版本 (保留 ${entries[0].name}，节省 ${savedMB} MB)`);
-}
-
-// 清理非目标平台的 prebuilds 目录（node-pty 等包自带多平台预编译二进制，只保留目标平台）
-function pruneNonTargetPrebuilds(nmDir, targetPlatform, targetArch) {
-  const targetName = `${targetPlatform}-${targetArch}`;
-  const packages = collectTopLevelPackages(nmDir);
-  let totalRemoved = 0;
-
-  for (const pkg of packages) {
-    const prebuildsDir = path.join(pkg.dir, "prebuilds");
-    if (!fs.existsSync(prebuildsDir)) continue;
-
-    for (const entry of fs.readdirSync(prebuildsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name === targetName) continue;
-      rmDir(path.join(prebuildsDir, entry.name));
-      totalRemoved++;
-    }
-  }
-
-  if (totalRemoved > 0) {
-    log(`已清理 ${totalRemoved} 个非目标平台 prebuilds 目录（保留 ${targetName}）`);
-  }
 }
 
 // 清理 node_modules/.bin 中的悬挂符号链接（避免 afterPack 拷贝时报 ENOENT）
@@ -842,12 +1021,12 @@ function assertNativeDepsMatchTarget(nmDir, platform, arch) {
 
   if (mismatches.length > 0) {
     die(
-      [
-        "检测到与目标平台不匹配的原生依赖：",
-        ...mismatches.slice(0, 10).map((m) => `  - ${m}`),
-        "",
-        "请重新执行 package-resources，确保 npm install 按目标平台/架构运行。",
-      ].join("\n")
+        [
+          "检测到与目标平台不匹配的原生依赖：",
+          ...mismatches.slice(0, 10).map((m) => `  - ${m}`),
+          "",
+          "请重新执行 package-resources，确保 npm install 按目标平台/架构运行。",
+        ].join("\n")
     );
   }
 }
@@ -865,7 +1044,7 @@ function installDependencies(opts, gatewayDir) {
     log(`gateway 依赖未变化且平台/来源匹配 (${targetStamp})，跳过 npm install`);
     const nmDir = path.join(gatewayDir, "node_modules");
     // 即使复用缓存依赖，也要执行最新裁剪规则，避免历史产物遗留冗余文件
-    pruneNodeModules(nmDir, opts.platform);
+    pruneNodeModules(nmDir);
     pruneDarwinUniversalNativePackages(nmDir, opts.platform);
     pruneLlamaPackages(nmDir);
     pruneDanglingBinLinks(nmDir);
@@ -895,26 +1074,12 @@ function installDependencies(opts, gatewayDir) {
   };
   fs.writeFileSync(path.join(gatewayDir, "package.json"), JSON.stringify(pkg, null, 2));
 
-  // 使用系统 npm 执行安装
-  // --os/--cpu + npm_config_os/cpu：强制按目标平台安装，避免跨平台打包时复用宿主机原生包
-  // --install-links: 对 file: 依赖做实际拷贝而非符号链接
-  // --legacy-peer-deps: 防止 npm 自动安装 peerDep 拉入巨型包（如 clawdbot 205MB）
-  execSync(`npm install --omit=dev --install-links --legacy-peer-deps --os=${opts.platform} --cpu=${opts.arch}`, {
-    cwd: gatewayDir,
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      NODE_ENV: "production",
-      npm_config_os: opts.platform,
-      npm_config_cpu: opts.arch,
-      // 避免 node-llama-cpp 在 cross-build 时执行 postinstall 下载/本地编译
-      NODE_LLAMA_CPP_SKIP_DOWNLOAD: "true",
-    },
-  });
+  // 使用系统 npm 执行安装（带重试机制，应对 Windows 文件锁定）
+  npmInstallWithRetry(gatewayDir, opts);
 
   log("依赖安装完成，开始裁剪 node_modules...");
   const nmDir = path.join(gatewayDir, "node_modules");
-  pruneNodeModules(nmDir, opts.platform);
+  pruneNodeModules(nmDir);
   pruneDarwinUniversalNativePackages(nmDir, opts.platform);
   pruneLlamaPackages(nmDir);
   pruneDanglingBinLinks(nmDir);
@@ -924,185 +1089,86 @@ function installDependencies(opts, gatewayDir) {
   log("node_modules 裁剪完成");
 }
 
-// Windows 上给 openclaw + kimi-claw 所有 spawn 调用统一补 windowsHide，避免黑框闪烁。
-// 采用全局扫描策略，不再逐文件 whack-a-mole，确保上游新增 spawn 调用自动被覆盖。
+// Windows 上给 openclaw 已知的 spawn 热点统一补 windowsHide，避免黑框闪烁。
 function patchWindowsOpenclawArtifacts(gatewayDir, platform = "win32") {
   if (platform !== "win32") return;
 
-  // 收集所有需要扫描的 JS 目录
-  const scanDirs = [];
-
-  // openclaw 核心 dist
   const distDir = path.join(gatewayDir, "node_modules", "openclaw", "dist");
   if (!fs.existsSync(distDir)) {
     die(`openclaw dist 目录不存在，无法应用 Windows 补丁: ${distDir}`);
   }
-  scanDirs.push(distDir);
 
-  // kimi-claw 插件（terminal-session-manager 有 pipe 回退未加 windowsHide）
-  const kimiClawDist = path.join(
-    gatewayDir, "node_modules", "openclaw", "extensions", "kimi-claw", "dist"
+  const distEntries = fs.readdirSync(distDir);
+  const execFiles = distEntries.filter((name) => /^exec-.*\.js$/.test(name));
+  const gatewayCliFiles = distEntries.filter((name) => /^gateway-cli-.*\.js$/.test(name));
+
+  const execResult = patchWindowsOpenclawFiles(distDir, execFiles, injectExecWindowsHide, hasExecWindowsHide);
+  const gatewayCliResult = patchWindowsOpenclawFiles(
+      distDir,
+      gatewayCliFiles,
+      injectGatewayRespawnWindowsHide,
+      hasGatewayRespawnWindowsHide
   );
-  if (fs.existsSync(kimiClawDist)) {
-    scanDirs.push(kimiClawDist);
+
+  if (execFiles.length === 0 || execResult.ready === 0) {
+    die("未能为 openclaw exec Windows spawn 注入 windowsHide，构建已终止");
+  }
+  if (gatewayCliFiles.length === 0 || gatewayCliResult.ready === 0) {
+    die("未能为 openclaw gateway-cli respawn 注入 windowsHide，构建已终止");
   }
 
-  let totalFiles = 0;
-  let totalPatched = 0;
-
-  for (const dir of scanDirs) {
-    const result = patchWindowsHideGlobal(dir);
-    totalFiles += result.scanned;
-    totalPatched += result.patched;
-  }
-
-  if (totalPatched > 0) {
-    log(`已全局注入 windowsHide: 扫描 ${totalFiles} 文件，补丁 ${totalPatched} 文件`);
-  } else {
-    log(`windowsHide 全局扫描完成: ${totalFiles} 文件均已就绪，无需补丁`);
-  }
+  log(
+      `已应用 openclaw Windows 补丁：exec=${execResult.patched}/${execResult.ready} gateway-cli=${gatewayCliResult.patched}/${gatewayCliResult.ready}`
+  );
 }
 
-// 全局扫描目录下所有 .js 文件，给缺失 windowsHide 的 spawn 调用注入补丁。
-// 幂等：已有 windowsHide 的 spawn 不会重复注入。
-function patchWindowsHideGlobal(dir) {
-  const jsFiles = collectJsFilesRecursive(dir);
-  let scanned = 0;
+// 扫描并重写目标文件；若上游产物结构变化，让构建直接失败而不是静默漂移。
+function patchWindowsOpenclawFiles(distDir, fileNames, transform, isReady) {
   let patched = 0;
-
-  for (const filePath of jsFiles) {
-    scanned += 1;
+  let ready = 0;
+  for (const fileName of fileNames) {
+    const filePath = path.join(distDir, fileName);
     const before = fs.readFileSync(filePath, "utf-8");
-    const after = injectWindowsHideAll(before);
+    const after = transform(before);
     if (after !== before) {
       fs.writeFileSync(filePath, after, "utf-8");
       patched += 1;
+      ready += 1;
+      continue;
+    }
+    if (isReady(before)) {
+      ready += 1;
     }
   }
-
-  return { scanned, patched };
+  return { patched, ready };
 }
 
-// 递归收集目录下所有 .js 文件
-function collectJsFilesRecursive(dir) {
-  const results = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...collectJsFilesRecursive(full));
-    } else if (entry.isFile() && entry.name.endsWith(".js")) {
-      results.push(full);
-    }
-  }
-  return results;
-}
-
-// 给源码中所有 spawn(..., { ... }) 调用注入 windowsHide: true。
-// 策略：匹配 spawn options 对象的起始 `{` 后第一个属性，回看确认是 spawn 上下文，
-// 前探确认同一 options 块内无 windowsHide 后注入。
-function injectWindowsHideAll(source) {
-  // 匹配 spawn options 对象的起始模式：
-  //   ], { stdio  — 数组参数后的 options（killProcessTree, exec 等）
-  //   ), { stdio  — 函数调用结果后的 options（slice(1) 等）
-  //   var, { stdio — 变量参数后的 options（spawn(cmd, args, { stdio...）
-  //   [], { cwd   — 空数组后的 options（kimi-claw terminal）
+// exec helper 会走 cmd.exe / batch；这里漏掉 windowsHide 就会直接闪黑框。
+function injectExecWindowsHide(source) {
+  const eol = source.includes("\r\n") ? "\r\n" : "\n";
   return source.replace(
-    /([)\]\w"']\s*,\s*\{)(\s*)(stdio|detached|cwd\b|env\s*[,:{])/g,
-    (match, prefix, ws, keyword, offset) => {
-      // 前探 600 字符：同一 options 块内已有 windowsHide 则跳过
-      const lookahead = source.slice(offset, offset + 600);
-      if (lookahead.includes("windowsHide")) return match;
-
-      // 回看 500 字符：确认在 spawn( 调用上下文中，避免误伤非 spawn 的对象字面量
-      const lookback = source.slice(Math.max(0, offset - 500), offset);
-      if (!/spawn\s*\(/.test(lookback)) return match;
-
-      return prefix + ws + "windowsHide: true," + ws + keyword;
-    }
+      /(\] : finalArgv\.slice\(1\), \{)(\r?\n)(\s*)stdio,/,
+      `$1$2$3windowsHide: true,${eol}$3stdio,`
   );
 }
 
-// ─── Step 2.4: 补丁 ASAR 路径校验（仅 asar 模式） ───
-//
-// openclaw 的 boundary-file-read 模块使用 O_NOFOLLOW + realpathSync + lstatSync
-// 组合校验插件清单路径的安全性。在 Electron ASAR 模式下，这些 syscall 对 asar 虚拟
-// 路径行为异常，导致所有 bundled 插件被判定为 "unsafe plugin manifest path"。
-//
-// 补丁策略：在 openVerifiedFileSync 函数开头注入一段 asar 路径快速通道——
-// 如果文件路径穿越 .asar 归档，直接用 fs.openSync + fs.fstatSync 打开并返回，
-// 跳过 realpathSync / O_NOFOLLOW / hardlink 检查。
-// Electron 的 ASAR patch 已保证归档内文件的完整性和只读性，无需额外校验。
+// 幂等校验：缓存依赖若已带 windowsHide，不应因为补丁再次运行而失败。
+function hasExecWindowsHide(source) {
+  return /\] : finalArgv\.slice\(1\), \{[\s\S]*?windowsHide:\s*true[\s\S]*?stdio,/.test(source);
+}
 
-function patchAsarBoundaryCheck(gatewayDir) {
-  const distDir = path.join(gatewayDir, "node_modules", "openclaw", "dist");
-  if (!fs.existsSync(distDir)) return;
+// respawn 已被 OPENCLAW_NO_RESPAWN 大多压住，但这里补上更稳，避免旁路重新污染主进程树。
+function injectGatewayRespawnWindowsHide(source) {
+  const eol = source.includes("\r\n") ? "\r\n" : "\n";
+  return source.replace(
+      /(spawn\(process\.execPath, args, \{)(\r?\n)(\s*)env: process\.env,/,
+      `$1$2$3windowsHide: true,${eol}$3env: process.env,`
+  );
+}
 
-  // 找到 boundary-file-read 模块（文件名含 hash）
-  const boundaryFiles = fs.readdirSync(distDir).filter((f) => f.startsWith("boundary-file-read-") && f.endsWith(".js"));
-  if (boundaryFiles.length === 0) {
-    log("⚠ 未找到 boundary-file-read 模块，跳过 ASAR 路径补丁");
-    return;
-  }
-
-  let patched = 0;
-  for (const fileName of boundaryFiles) {
-    const filePath = path.join(distDir, fileName);
-    const source = fs.readFileSync(filePath, "utf-8");
-
-    if (source.includes("/* asar-bypass */")) continue; // 已打过补丁
-
-    let result = source;
-
-    // 补丁 1: openBoundaryFileSync — 插件清单加载的入口函数
-    // 在 resolveBoundaryPathSync 之前拦截，避免 ASAR 虚拟路径触发 realpath/lstat 校验失败
-    const boundaryMarker = "function openBoundaryFileSync(params) {";
-    if (result.includes(boundaryMarker)) {
-      const boundaryBypass = [
-        "function openBoundaryFileSync(params) {",
-        "\t/* asar-bypass */ if (params.absolutePath && params.absolutePath.includes('.asar')) {",
-        "\t\tconst ioFs = params.ioFs ?? fs;",
-        "\t\ttry {",
-        "\t\t\tconst fd = ioFs.openSync(params.absolutePath, ioFs.constants.O_RDONLY);",
-        "\t\t\tconst stat = ioFs.fstatSync(fd);",
-        "\t\t\treturn { ok: true, path: params.absolutePath, fd, stat, rootRealPath: params.rootPath };",
-        "\t\t} catch (e) {",
-        "\t\t\treturn { ok: false, reason: 'validation' };",
-        "\t\t}",
-        "\t}",
-      ].join("\n");
-      result = result.replace(boundaryMarker, boundaryBypass);
-    }
-
-    // 补丁 2: openVerifiedFileSync — 兜底，防止其他调用路径也触发校验
-    const verifiedMarker = "function openVerifiedFileSync(params) {";
-    if (result.includes(verifiedMarker)) {
-      const verifiedBypass = [
-        "function openVerifiedFileSync(params) {",
-        "\t/* asar-bypass-verified */ if (params.filePath && params.filePath.includes('.asar')) {",
-        "\t\tconst ioFs = params.ioFs ?? fs;",
-        "\t\ttry {",
-        "\t\t\tconst fd = ioFs.openSync(params.filePath, ioFs.constants.O_RDONLY);",
-        "\t\t\tconst stat = ioFs.fstatSync(fd);",
-        "\t\t\treturn { ok: true, path: params.filePath, fd, stat };",
-        "\t\t} catch (e) {",
-        "\t\t\treturn { ok: false, reason: 'validation' };",
-        "\t\t}",
-        "\t}",
-      ].join("\n");
-      result = result.replace(verifiedMarker, verifiedBypass);
-    }
-
-    if (result !== source) {
-      fs.writeFileSync(filePath, result, "utf-8");
-      patched++;
-    }
-  }
-
-  if (patched > 0) {
-    log(`已补丁 ${patched} 个 boundary-file-read 模块（ASAR 路径快速通道）`);
-  } else {
-    log("⚠ boundary-file-read 模块结构不匹配，补丁未生效");
-  }
+// 幂等校验：已打过补丁的 gateway-cli 允许重复复用，不重复报错。
+function hasGatewayRespawnWindowsHide(source) {
+  return /spawn\(process\.execPath, args, \{[\s\S]*?windowsHide:\s*true[\s\S]*?env: process\.env,/.test(source);
 }
 
 // ─── Step 2.5: 注入 bundled 插件（kimi-claw + kimi-search + qqbot + dingtalk） ───
@@ -1117,7 +1183,6 @@ const BUNDLED_PLUGINS = [
     defaultURL: KIMI_CLAW_DEFAULT_TGZ_URL,
     cacheFile: KIMI_CLAW_CACHE_FILE,
     // 校验解压产物必须包含的文件
-    requiredFiles: ["package.json", "openclaw.plugin.json"],
     requiredFiles: ["package.json", "openclaw.plugin.json"],
   },
   {
@@ -1147,69 +1212,6 @@ const BUNDLED_PLUGINS = [
     requiredFiles: ["package.json", "openclaw.plugin.json"],
     getSource: getWecomPluginPackageSource,
   },
-  {
-    id: "openclaw-weixin",
-    packageName: WEIXIN_PLUGIN_PACKAGE_NAME,
-    requiredFiles: ["package.json", "openclaw.plugin.json"],
-    getSource: getWeixinPluginPackageSource,
-  },
-];
-
-// openclaw/skills 只保留 OneClaw 产品需要的内置技能，上游新增 skill 不会自动打入。
-const OPENCLAW_SKILLS_ALLOWLIST = new Set([
-  "canvas",
-  "clawhub",
-  "coding-agent",
-  "discord",
-  "github",
-  "healthcheck",
-  "model-usage",
-  "notion",
-  "session-logs",
-  "skill-creator",
-  "tmux",
-  "video-frames",
-  "weather",
-]);
-
-// 仅 macOS 构建时额外保留的 skills（依赖 macOS 专有 API 或 app）
-const OPENCLAW_SKILLS_DARWIN_ONLY = new Set([
-  "apple-notes",
-  "apple-reminders",
-  "camsnap",
-  "imsg",
-  "peekaboo",
-]);
-
-// openclaw/extensions 只保留 OneClaw 当前产品面和运行时基础插件。
-const OPENCLAW_EXTENSION_ALLOWLIST = new Set([
-  "shared",
-  "memory-core",
-  "device-pair",
-  "feishu",
-  "imessage",
-  "telegram",
-  "kimi-claw",
-  "kimi-search",
-  "qqbot",
-  "dingtalk-connector",
-  "wecom-openclaw-plugin",
-  "openclaw-weixin",
-]);
-
-// 构建产物校验需要覆盖白名单中的关键扩展，避免悄悄打出残缺包。
-const REQUIRED_OPENCLAW_EXTENSION_OUTPUTS = [
-  "shared",
-  path.join("memory-core", "openclaw.plugin.json"),
-  path.join("device-pair", "openclaw.plugin.json"),
-  path.join("feishu", "openclaw.plugin.json"),
-  path.join("imessage", "openclaw.plugin.json"),
-  path.join("kimi-claw", "openclaw.plugin.json"),
-  path.join("kimi-search", "openclaw.plugin.json"),
-  path.join("qqbot", "openclaw.plugin.json"),
-  path.join("dingtalk-connector", "openclaw.plugin.json"),
-  path.join("wecom-openclaw-plugin", "openclaw.plugin.json"),
-  path.join("openclaw-weixin", "openclaw.plugin.json"),
 ];
 
 // 解析插件包来源（优先本地 tgz，其次远程 URL）
@@ -1329,20 +1331,7 @@ async function bundleNpmPackagePlugin(plugin, gatewayDir, targetId, opts) {
   fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify(tmpPkg, null, 2));
 
   try {
-    execSync(
-      `npm install --omit=dev --install-links --legacy-peer-deps --os=${opts.platform} --cpu=${opts.arch}`,
-      {
-        cwd: tmpDir,
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          NODE_ENV: "production",
-          npm_config_os: opts.platform,
-          npm_config_cpu: opts.arch,
-          NODE_LLAMA_CPP_SKIP_DOWNLOAD: "true",
-        },
-      }
-    );
+    npmInstallWithRetry(tmpDir, opts);
   } catch (err) {
     rmDir(tmpDir);
     die(`安装 ${plugin.id} 插件失败: ${err.message || String(err)}`);
@@ -1361,9 +1350,7 @@ async function bundleNpmPackagePlugin(plugin, gatewayDir, targetId, opts) {
   copyDirSync(installedPkgDir, pluginDir);
 
   // 将提升（hoisted）到 tmpDir/node_modules 的传递依赖收集到插件自身的 node_modules
-  // 跳过 gateway 顶层 node_modules 已有的包（去重，避免 openclaw 等巨型依赖被重复拷贝）
   const tmpNm = path.join(tmpDir, "node_modules");
-  const hostNm = path.join(gatewayDir, "node_modules");
   const pluginNm = path.join(pluginDir, "node_modules");
   ensureDir(pluginNm);
 
@@ -1378,8 +1365,6 @@ async function bundleNpmPackagePlugin(plugin, gatewayDir, targetId, opts) {
         const fullName = `${entry.name}/${child.name}`;
         // 跳过插件包自身
         if (fullName === plugin.packageName) continue;
-        // 宿主已有的跳过（运行时会向上查找到 gateway node_modules）
-        if (fs.existsSync(path.join(hostNm, entry.name, child.name))) continue;
         // 插件 node_modules 里已有的跳过（npm 嵌套安装的优先）
         const dest = path.join(pluginNm, entry.name, child.name);
         if (fs.existsSync(dest)) continue;
@@ -1389,16 +1374,14 @@ async function bundleNpmPackagePlugin(plugin, gatewayDir, targetId, opts) {
     } else {
       // 跳过插件包自身
       if (entry.name === plugin.packageName) continue;
-      // 宿主已有的跳过
-      if (fs.existsSync(path.join(hostNm, entry.name))) continue;
       const dest = path.join(pluginNm, entry.name);
       if (fs.existsSync(dest)) continue;
       copyDirSync(path.join(tmpNm, entry.name), dest);
     }
   }
 
-  // 裁剪插件的 node_modules（插件内无 skills 目录，platform 无影响）
-  pruneNodeModules(pluginNm, null);
+  // 裁剪插件的 node_modules
+  pruneNodeModules(pluginNm);
   pruneLlamaPackages(pluginNm);
   pruneFFmpegBinaries(pluginNm);
   prunePdfParseRedundantVersions(pluginNm);
@@ -1410,120 +1393,10 @@ async function bundleNpmPackagePlugin(plugin, gatewayDir, targetId, opts) {
 
   // 写入版本戳
   fs.writeFileSync(
-    path.join(pluginDir, `.oneclaw-${plugin.id}-stamp.json`),
-    JSON.stringify({ source: sourceInfo.stampSource, bundledAt: new Date().toISOString() }, null, 2)
+      path.join(pluginDir, `.oneclaw-${plugin.id}-stamp.json`),
+      JSON.stringify({ source: sourceInfo.stampSource, bundledAt: new Date().toISOString() }, null, 2)
   );
   log(`已注入 ${plugin.id} 插件到 ${path.relative(ROOT, pluginDir)}`);
-}
-
-// tgz 插件依赖补装：读取 package.json dependencies，在临时目录安装后收集到插件 node_modules
-function installTgzPluginDeps(plugin, pluginDir, targetId, opts) {
-  const pkgPath = path.join(pluginDir, "package.json");
-  if (!fs.existsSync(pkgPath)) return;
-
-  let pkg;
-  try { pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8")); } catch { return; }
-
-  const deps = pkg.dependencies;
-  if (!deps || Object.keys(deps).length === 0) return;
-
-  // 检查是否所有依赖已经存在（增量构建场景）
-  const pluginNm = path.join(pluginDir, "node_modules");
-  const allPresent = Object.keys(deps).every((name) => {
-    const depDir = path.join(pluginNm, ...name.split("/"));
-    return fs.existsSync(depDir);
-  });
-  if (allPresent) {
-    log(`${plugin.id} 依赖已就位，跳过安装`);
-    return;
-  }
-
-  log(`为 ${plugin.id} 安装生产依赖: ${Object.keys(deps).join(", ")} ...`);
-
-  const depTmpDir = createExtractTmpDir(TARGETS_ROOT, `${targetId}_tgzdeps_${plugin.id}`);
-  const tmpPkg = { dependencies: deps };
-  fs.writeFileSync(path.join(depTmpDir, "package.json"), JSON.stringify(tmpPkg, null, 2));
-
-  try {
-    execSync(
-      `npm install --omit=dev --install-links --legacy-peer-deps --ignore-scripts --os=${opts.platform} --cpu=${opts.arch}`,
-      {
-        cwd: depTmpDir,
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          NODE_ENV: "production",
-          npm_config_os: opts.platform,
-          npm_config_cpu: opts.arch,
-          NODE_LLAMA_CPP_SKIP_DOWNLOAD: "true",
-        },
-      }
-    );
-  } catch (err) {
-    rmDir(depTmpDir);
-    die(`安装 ${plugin.id} 依赖失败: ${err.message || String(err)}`);
-  }
-
-  // --ignore-scripts 跳过了 native addon 编译，对需要 node-gyp 的包单独 rebuild
-  // 只 rebuild 有 binding.gyp 但没有 prebuilds 的包（有 prebuilds 的如 node-pty 不需要编译）
-  // 必须 target Electron 的 Node ABI（gateway 由 Electron binary + ELECTRON_RUN_AS_NODE 启动）
-  // macOS Apple Clang 支持 --arch 交叉编译（arm64 runner 可编译 x64 产物）
-  const nativeAddonPkgs = Object.keys(deps).filter((name) => {
-    const pkgDir = path.join(depTmpDir, "node_modules", ...name.split("/"));
-    const hasBindingGyp = fs.existsSync(path.join(pkgDir, "binding.gyp"));
-    const hasPrebuilds = fs.existsSync(path.join(pkgDir, "prebuilds"));
-    return hasBindingGyp && !hasPrebuilds;
-  });
-  if (nativeAddonPkgs.length > 0) {
-    // 读取 Electron 版本，用于 node-gyp --target（确保 ABI 匹配）
-    const electronVersion = JSON.parse(
-      fs.readFileSync(path.join(ROOT, "node_modules", "electron", "package.json"), "utf-8")
-    ).version;
-    log(`为 ${plugin.id} 编译 native addon: ${nativeAddonPkgs.join(", ")} (arch=${opts.arch}, electron=${electronVersion})`);
-    for (const pkg of nativeAddonPkgs) {
-      try {
-        execSync(`npm rebuild ${pkg} --arch=${opts.arch} --runtime=electron --target=${electronVersion} --dist-url=https://electronjs.org/headers`, {
-          cwd: depTmpDir,
-          stdio: "inherit",
-        });
-      } catch (err) {
-        log(`⚠ ${plugin.id} native addon ${pkg} 编译失败（${opts.arch}）: ${err.message || String(err)}`);
-      }
-    }
-  }
-
-  // 收集 hoisted 依赖到插件 node_modules
-  const tmpNm = path.join(depTmpDir, "node_modules");
-  ensureDir(pluginNm);
-
-  for (const entry of fs.readdirSync(tmpNm, { withFileTypes: true })) {
-    if (entry.name.startsWith(".") || !entry.isDirectory()) continue;
-
-    if (entry.name.startsWith("@")) {
-      const scopeDir = path.join(tmpNm, entry.name);
-      for (const child of fs.readdirSync(scopeDir, { withFileTypes: true })) {
-        if (!child.isDirectory()) continue;
-        const dest = path.join(pluginNm, entry.name, child.name);
-        if (fs.existsSync(dest)) continue;
-        ensureDir(path.join(pluginNm, entry.name));
-        copyDirSync(path.join(scopeDir, child.name), dest);
-      }
-    } else {
-      const dest = path.join(pluginNm, entry.name);
-      if (fs.existsSync(dest)) continue;
-      copyDirSync(path.join(tmpNm, entry.name), dest);
-    }
-  }
-
-  // 裁剪依赖中的无用文件
-  pruneNodeModules(pluginNm, null);
-  pruneDanglingBinLinks(pluginNm);
-
-  // 清理非目标平台的 prebuilds（node-pty 自带 4 个平台的预编译二进制，只保留目标平台）
-  pruneNonTargetPrebuilds(pluginNm, opts.platform, opts.arch);
-
-  rmDir(depTmpDir);
-  log(`${plugin.id} 依赖安装完成`);
 }
 
 // 将插件注入 openclaw/extensions/<id>（支持 tgz 解压和 npm 包两种来源）
@@ -1549,12 +1422,8 @@ async function bundlePlugin(plugin, gatewayDir, targetId, opts) {
   let extracted = false;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      // Windows: --force-local 防止冒号被当作远程主机分隔符；路径转正斜杠防止 GNU tar 解析失败
-      const isWin = process.platform === "win32";
-      const forceLocal = isWin ? " --force-local" : "";
-      const archivePath = isWin ? source.archivePath.replace(/\\/g, "/") : source.archivePath;
-      const extractDir = isWin ? tmpDir.replace(/\\/g, "/") : tmpDir;
-      execSync(`tar${forceLocal} -xzf "${archivePath}" -C "${extractDir}"`, { stdio: "inherit" });
+      // 使用跨平台 Node.js 原生解压（兼容 Windows/macOS/Linux）
+      extractTarGz(source.archivePath, tmpDir);
       extracted = true;
       break;
     } catch (err) {
@@ -1589,49 +1458,36 @@ async function bundlePlugin(plugin, gatewayDir, targetId, opts) {
   copyDirSync(extractedPkgDir, pluginDir);
   rmDir(tmpDir);
 
-  // tgz 插件可能声明了 dependencies 但不自带 node_modules，需要补装
-  installTgzPluginDeps(plugin, pluginDir, targetId, opts);
-
   const stamp = { source: source.sourceLabel, bundledAt: new Date().toISOString() };
   fs.writeFileSync(
-    path.join(pluginDir, `.oneclaw-${plugin.id}-stamp.json`),
-    JSON.stringify(stamp, null, 2)
+      path.join(pluginDir, `.oneclaw-${plugin.id}-stamp.json`),
+      JSON.stringify(stamp, null, 2)
   );
   log(`已注入 ${plugin.id} 插件到 ${path.relative(ROOT, pluginDir)}`);
 }
 
-// 是否 Windows arm64 交叉编译（x64 runner 无法为 arm64 编译 native addon）
-// macOS 交叉编译由 Apple Clang 支持，不视为受限场景
-function isWindowsArm64CrossCompile(opts) {
-  if (opts.platform !== "win32" || opts.arch !== "arm64") return false;
-  return process.arch !== "arm64";
-}
-
 // 注入所有 bundled 插件
 async function bundleAllPlugins(gatewayDir, targetId, opts) {
-  const winArm64Cross = isWindowsArm64CrossCompile(opts);
   for (const plugin of BUNDLED_PLUGINS) {
-    if (winArm64Cross) {
-      try {
-        await bundlePlugin(plugin, gatewayDir, targetId, opts);
-      } catch (err) {
-        log(`⚠ Windows arm64 交叉编译下插件 ${plugin.id} 注入失败，跳过: ${err.message || String(err)}`);
-      }
-    } else {
-      await bundlePlugin(plugin, gatewayDir, targetId, opts);
-    }
+    await bundlePlugin(plugin, gatewayDir, targetId, opts);
   }
 }
 
 // 裁剪 node_modules，删除无用文件以减小体积
-// platform: "darwin" | "win32"，用于条件保留平台专属 skills
-function pruneNodeModules(nmDir, platform) {
+function pruneNodeModules(nmDir) {
   if (!fs.existsSync(nmDir)) return;
 
   const openclawDir = path.join(nmDir, "openclaw");
   const openclawDocsDir = path.join(openclawDir, "docs");
   const openclawExtensionsDir = path.join(openclawDir, "extensions");
   const openclawDocsKeepDir = path.join(openclawDocsDir, "reference", "templates");
+
+  // 需要删除的文档文件名（精确匹配，不区分大小写，避免误杀 changelog.js 等源文件）
+  const junkNames = new Set([
+    "readme", "readme.md", "readme.txt", "readme.markdown",
+    "changelog", "changelog.md", "changelog.txt",
+    "history.md", "authors", "authors.md", "contributors.md",
+  ]);
 
   // 需要删除的目录名（只保留运行所需内容）
   const junkDirs = new Set([
@@ -1646,19 +1502,6 @@ function pruneNodeModules(nmDir, platform) {
     "benchmark",
     "benchmarks",
   ]);
-
-  // 需要删除的文档基名与允许删除的文档扩展，避免误杀 changelog.js 等源文件。
-  const junkDocBases = new Set([
-    "readme",
-    "changelog",
-    "history",
-    "authors",
-    "contributors",
-    "license",
-    "licence",
-    "contributing",
-  ]);
-  const junkDocExtensions = new Set(["", ".md", ".txt", ".markdown", ".rst"]);
 
   let removedFiles = 0;
   let removedDirs = 0;
@@ -1690,26 +1533,10 @@ function pruneNodeModules(nmDir, platform) {
   // 判断是否为 TS 声明文件（path.extname 无法直接识别 .d.ts）
   function isTypeDeclarationFile(fileNameLower) {
     return (
-      fileNameLower.endsWith(".d.ts") ||
-      fileNameLower.endsWith(".d.mts") ||
-      fileNameLower.endsWith(".d.cts")
+        fileNameLower.endsWith(".d.ts") ||
+        fileNameLower.endsWith(".d.mts") ||
+        fileNameLower.endsWith(".d.cts")
     );
-  }
-
-  // 测试产物命名很稳定，直接按后缀剔除即可。
-  function isTestArtifactFile(fileNameLower) {
-    return fileNameLower.includes(".test.") || fileNameLower.includes(".spec.");
-  }
-
-  // 文档文件按安全白名单匹配，只删常见文档扩展，避免误杀源码。
-  function isJunkDocFile(fileNameLower) {
-    const parsed = path.parse(fileNameLower);
-    return junkDocBases.has(parsed.name) && junkDocExtensions.has(parsed.ext);
-  }
-
-  // 插件包常见会把无用依赖藏到 .ignored*，这些目录不该进入正式产物。
-  function isIgnoredJunkDir(dirName) {
-    return dirName === ".ignored" || dirName.startsWith(".ignored_");
   }
 
   // 精简 openclaw/docs，仅保留运行时必需模板 docs/reference/templates
@@ -1752,52 +1579,6 @@ function pruneNodeModules(nmDir, platform) {
     walkDocs(openclawDocsDir);
   }
 
-  // openclaw/extensions 不再整目录豁免，只保留 OneClaw 需要的插件。
-  function pruneOpenclawExtensions() {
-    if (!fs.existsSync(openclawExtensionsDir)) return;
-
-    let entries;
-    try {
-      entries = fs.readdirSync(openclawExtensionsDir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      const fullPath = path.join(openclawExtensionsDir, entry.name);
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      if (!OPENCLAW_EXTENSION_ALLOWLIST.has(entry.name)) {
-        removeDir(fullPath);
-        continue;
-      }
-      walk(fullPath);
-    }
-  }
-
-  // 按白名单保留内置 skills，删除不在列表中的技能目录
-  const openclawSkillsDir = path.join(openclawDir, "skills");
-  function pruneOpenclawSkills() {
-    if (!fs.existsSync(openclawSkillsDir)) return;
-
-    let entries;
-    try {
-      entries = fs.readdirSync(openclawSkillsDir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const allowed = OPENCLAW_SKILLS_ALLOWLIST.has(entry.name)
-        || (platform === "darwin" && OPENCLAW_SKILLS_DARWIN_ONLY.has(entry.name));
-      if (!allowed) {
-        removeDir(path.join(openclawSkillsDir, entry.name));
-      }
-    }
-  }
-
   // 递归遍历并清理
   function walk(dir) {
     let entries;
@@ -1811,16 +1592,8 @@ function pruneNodeModules(nmDir, platform) {
       const fullPath = path.join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        // extensions 改成白名单保留，并继续深入清理保留插件内部垃圾。
-        if (fullPath === openclawExtensionsDir) {
-          pruneOpenclawExtensions();
-          continue;
-        }
-
-        // skills 按黑名单删除中国用户不需要的内置技能
-        if (fullPath === openclawSkillsDir) {
-          pruneOpenclawSkills();
-          walk(fullPath);
+        // extensions 目录整体保护 — 插件 skills、docs 等子目录不受裁剪
+        if (isPathInside(fullPath, openclawExtensionsDir)) {
           continue;
         }
 
@@ -1830,7 +1603,7 @@ function pruneNodeModules(nmDir, platform) {
           continue;
         }
 
-        if (junkDirs.has(entry.name) || isIgnoredJunkDir(entry.name)) {
+        if (junkDirs.has(entry.name)) {
           removeDir(fullPath);
         } else {
           walk(fullPath);
@@ -1838,11 +1611,7 @@ function pruneNodeModules(nmDir, platform) {
       } else {
         const nameLower = entry.name.toLowerCase();
         const ext = path.extname(nameLower);
-        const shouldDelete =
-          isTypeDeclarationFile(nameLower) ||
-          ext === ".map" ||
-          isTestArtifactFile(nameLower) ||
-          isJunkDocFile(nameLower);
+        const shouldDelete = isTypeDeclarationFile(nameLower) || ext === ".map" || junkNames.has(nameLower);
         if (shouldDelete) {
           removeFile(fullPath);
         }
@@ -1854,10 +1623,10 @@ function pruneNodeModules(nmDir, platform) {
   log(`node_modules 裁剪统计: 删除文件 ${removedFiles} 个，删除目录 ${removedDirs} 个`);
 }
 
-// ─── Step 3: 生成构建配置（埋点 + ClawHub Registry） ───
+// ─── Step 3: 生成埋点配置 ───
 
-function generateBuildConfig(targetPaths) {
-  writeBuildConfig(targetPaths.buildConfigPath);
+function generateAnalyticsConfig(targetPaths) {
+  writeAnalyticsConfig(targetPaths.analyticsConfigPath);
 }
 
 // ─── Step 4: 拷贝图标资源 ───
@@ -1891,136 +1660,17 @@ function generateEntryAndBuildInfo(gatewayDir, platform, arch) {
   log("已生成 build-info.json");
 }
 
-// ─── Step 6: Gateway ASAR 打包（可选） ───
-
-// koffi 平台名映射（从 afterPack.js 前移）
-const KOFFI_PLATFORM_MAP = {
-  "darwin-x64": "darwin_x64",
-  "darwin-arm64": "darwin_arm64",
-  "win32-x64": "win32_x64",
-  "win32-arm64": "win32_arm64",
-};
-
-// koffi 仅保留目标平台的 native binary，asar 打包前必须裁剪（asar 打包后无法修改）
-function pruneKoffiPlatforms(gatewayDir, platform, arch) {
-  const koffiBuildsDir = path.join(gatewayDir, "node_modules", "koffi", "build", "koffi");
-  if (!fs.existsSync(koffiBuildsDir)) return;
-
-  const keepDir = KOFFI_PLATFORM_MAP[`${platform}-${arch}`];
-  let removedCount = 0;
-  for (const entry of fs.readdirSync(koffiBuildsDir, { withFileTypes: true })) {
-    if (entry.isDirectory() && entry.name !== keepDir) {
-      rmDir(path.join(koffiBuildsDir, entry.name));
-      removedCount++;
-    }
-  }
-  log(`koffi: 保留 ${keepDir}，删除 ${removedCount} 个其余平台目录`);
-}
-
-// 将 gateway/ 散文件打包为 gateway.asar + gateway.asar.unpacked/
-async function packGatewayAsar(gatewayDir, targetBase, platform, arch) {
-  const asar = require("@electron/asar");
-  const asarPath = path.join(targetBase, "gateway.asar");
-
-  // asar 打包前执行 koffi 平台裁剪（asar 内文件不可修改）
-  pruneKoffiPlatforms(gatewayDir, platform, arch);
-
-  // 补丁 boundary-file-read：让 asar 内路径绕过 O_NOFOLLOW / realpathSync 校验
-  patchAsarBoundaryCheck(gatewayDir);
-
-  // unpack 规则：仅二进制文件需要 unpack（dlopen 不支持 asar 虚拟路径）
-  // extensions/ 不再需要 unpack——boundary-file-read 补丁已处理 asar 路径校验
-  log("正在打包 gateway.asar ...");
-  await asar.createPackageWithOptions(gatewayDir, asarPath, {
-    unpack: "{**/*.node,**/*.exe,**/*.dll,**/*.dylib,**/*.so,**/spawn-helper}",
-  });
-
-  const asarSize = (fs.statSync(asarPath).size / 1048576).toFixed(1);
-  log(`gateway.asar 打包完成: ${asarSize} MB`);
-
-  // 校验 asar 内关键文件
-  verifyAsarContents(asarPath);
-
-  // 统计 unpacked 文件数
-  const unpackedDir = path.join(targetBase, "gateway.asar.unpacked");
-  if (fs.existsSync(unpackedDir)) {
-    const unpackedFiles = countFilesRecursive(unpackedDir);
-    log(`gateway.asar.unpacked: ${unpackedFiles} 个文件`);
-  }
-
-  // 删除散文件目录
-  rmDir(gatewayDir);
-  log("已删除 gateway/ 散文件目录");
-}
-
-// 校验 asar 内关键入口文件存在
-function verifyAsarContents(asarPath) {
-  const asar = require("@electron/asar");
-  // Windows 上 listPackage 返回反斜杠路径，统一转正斜杠再比较
-  const files = new Set(asar.listPackage(asarPath).map((f) => f.replace(/\\/g, "/")));
-
-  const required = [
-    "/node_modules/openclaw/openclaw.mjs",
-    "/node_modules/openclaw/dist/entry.js",
-    "/node_modules/clawhub/bin/clawdhub.js",
-  ];
-
-  const missing = required.filter((f) => !files.has(f));
-  if (missing.length > 0) {
-    die(`gateway.asar 缺少关键文件:\n${missing.map((f) => `  - ${f}`).join("\n")}`);
-  }
-  log(`gateway.asar 关键文件校验通过 (${files.length} 个文件)`);
-}
-
-// 递归统计文件数
-function countFilesRecursive(dir) {
-  let count = 0;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      count += countFilesRecursive(path.join(dir, entry.name));
-    } else {
-      count++;
-    }
-  }
-  return count;
-}
-
 // 验证目标目录关键文件是否存在
-function verifyOutput(targetPaths, opts) {
+function verifyOutput(targetPaths, platform) {
   log("正在验证输出文件...");
 
-  const platform = opts.platform;
   const nodeExe = platform === "darwin" ? "node" : "node.exe";
   const targetRel = path.relative(ROOT, targetPaths.targetBase);
 
   // macOS npm 在 vendor/npm/，Windows npm 在 node_modules/npm/
   const npmDir = platform === "darwin"
-    ? path.join(targetRel, "runtime", "vendor", "npm")
-    : path.join(targetRel, "runtime", "node_modules", "npm");
-
-  // asar 模式下散文件已被删除，只校验 gateway.asar 和基础资源
-  if (opts.asar) {
-    const required = [
-      path.join(targetRel, "runtime", nodeExe),
-      npmDir,
-      path.join(targetRel, "gateway.asar"),
-      path.join(targetRel, "build-config.json"),
-      path.join(targetRel, "app-icon.png"),
-    ];
-
-    let allOk = true;
-    for (const rel of required) {
-      const abs = path.join(ROOT, rel);
-      const exists = fs.existsSync(abs);
-      const status = exists ? "OK" : "缺失";
-      console.log(`  [${status}] ${rel}`);
-      if (!exists) allOk = false;
-    }
-
-    if (!allOk) die("关键文件缺失，打包失败");
-    log("所有关键文件验证通过 (asar 模式)");
-    return;
-  }
+      ? path.join(targetRel, "runtime", "vendor", "npm")
+      : path.join(targetRel, "runtime", "node_modules", "npm");
 
   const required = [
     path.join(targetRel, "runtime", nodeExe),
@@ -2030,32 +1680,22 @@ function verifyOutput(targetPaths, opts) {
     path.join(targetRel, "gateway", "node_modules", "openclaw", "dist", "entry.js"),
     path.join(targetRel, "gateway", "node_modules", "openclaw", "dist", "control-ui", "index.html"),
     path.join(targetRel, "gateway", "node_modules", "clawhub", "bin", "clawdhub.js"),
-    path.join(targetRel, "build-config.json"),
+    path.join(targetRel, "analytics-config.json"),
     path.join(targetRel, "app-icon.png"),
   ];
 
-  // Windows arm64 交叉编译时含 native addon 的插件可能注入失败，校验时降级为 warning
-  const winArm64Cross = isWindowsArm64CrossCompile(opts);
-  const crossCompileOptionalExts = new Set(["kimi-claw", "kimi-search"]);
-
   required.push(
-    ...REQUIRED_OPENCLAW_EXTENSION_OUTPUTS.map((relPath) =>
-      path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", relPath)
-    )
+      path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "kimi-claw", "openclaw.plugin.json"),
+      path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "kimi-search", "openclaw.plugin.json"),
+      path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "qqbot", "openclaw.plugin.json"),
+      path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "dingtalk-connector", "openclaw.plugin.json"),
+      path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "wecom-openclaw-plugin", "openclaw.plugin.json"),
   );
 
   let allOk = true;
   for (const rel of required) {
     const abs = path.join(ROOT, rel);
     const exists = fs.existsSync(abs);
-
-    // Windows arm64 交叉编译时，可选扩展缺失只 warning
-    const isOptionalExt = winArm64Cross && [...crossCompileOptionalExts].some((ext) => rel.includes(`extensions${path.sep}${ext}`));
-    if (!exists && isOptionalExt) {
-      console.log(`  [跳过] ${rel} (Windows arm64 交叉编译，可选)`);
-      continue;
-    }
-
     const status = exists ? "OK" : "缺失";
     console.log(`  [${status}] ${rel}`);
     if (!exists) allOk = false;
@@ -2106,9 +1746,9 @@ async function main() {
 
   console.log();
 
-  // Step 3: 生成构建配置（埋点 + ClawHub Registry）
-  log("Step 3: 生成构建配置");
-  generateBuildConfig(targetPaths);
+  // Step 3: 生成埋点配置（URL / API Key 仅来自打包环境变量）
+  log("Step 3: 生成埋点配置");
+  generateAnalyticsConfig(targetPaths);
 
   console.log();
 
@@ -2124,18 +1764,8 @@ async function main() {
 
   console.log();
 
-  // Step 6: Gateway ASAR 打包（--asar 或 ONECLAW_GATEWAY_ASAR=1 时启用）
-  if (opts.asar) {
-    log("Step 6: Gateway ASAR 打包");
-    await packGatewayAsar(targetPaths.gatewayDir, targetPaths.targetBase, opts.platform, opts.arch);
-  } else {
-    log("Step 6: 跳过 ASAR 打包（未指定 --asar）");
-  }
-
-  console.log();
-
   // 最终验证
-  verifyOutput(targetPaths, opts);
+  verifyOutput(targetPaths, opts.platform);
 
   console.log();
   log("资源打包完成！");
