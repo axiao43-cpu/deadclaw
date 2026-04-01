@@ -53,6 +53,10 @@ nsis:
   perMachine: false
   # 允许用户自选安装目录
   allowToChangeInstallationDirectory: true
+  # 安装器界面图标与侧边图统一使用当前品牌资源
+  installerHeaderIcon: assets/icon.ico
+  installerSidebar: assets/installer-sidebar.bmp
+  uninstallerSidebar: assets/uninstaller-sidebar.bmp
   # 安装前强制终止旧进程，避免托盘模式下 WM_CLOSE 被拦截
   include: "scripts/installer.nsh"
   # "always" 确保更新安装时也重新创建快捷方式（默认 true 只在首次安装创建）
