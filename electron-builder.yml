@@ -35,7 +35,7 @@ mac:
 # 自动更新：指向阿里云 CDN
 publish:
   provider: generic
-  url: http://120.48.149.5/releases/
+  url: http://deadclaw.icu/releases/
 
 dmg:
   sign: false

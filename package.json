@@ -1,6 +1,6 @@
 {
   "name": "deadclaw",
-  "version": "2026.3.31",
+  "version": "2026.4.1",
   "private": true,
   "description": "DeadClaw desktop app — cross-platform Electron shell for openclaw",
   "main": "dist/main.js",
