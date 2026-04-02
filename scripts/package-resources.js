@@ -820,6 +820,78 @@ function readGatewayStamp(stampPath) {
   }
 }
 
+// 读取 openclaw/extensions 下插件包声明的运行时依赖，补齐被 npm 提升到根级后仍引用其子依赖的场景。
+function collectBundledPluginRuntimeDependencies(gatewayDir) {
+  const extensionsDir = path.join(gatewayDir, "node_modules", "openclaw", "extensions");
+  if (!fs.existsSync(extensionsDir)) {
+    return [];
+  }
+
+  const staged = new Map();
+  for (const entry of fs.readdirSync(extensionsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const pkgPath = path.join(extensionsDir, entry.name, "package.json");
+    if (!fs.existsSync(pkgPath)) continue;
+
+    let pkg;
+    try {
+      pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+    } catch {
+      continue;
+    }
+
+    const deps = pkg.dependencies && typeof pkg.dependencies === "object" ? pkg.dependencies : {};
+    for (const [name, version] of Object.entries(deps)) {
+      if (!name || typeof version !== "string" || !version.trim()) continue;
+      if (!staged.has(name)) {
+        staged.set(name, version.trim());
+      }
+    }
+  }
+
+  return Array.from(staged.entries()).map(([name, version]) => ({ name, version }));
+}
+
+function stageBundledPluginRuntimeDependencies(gatewayDir) {
+  const stagedDeps = collectBundledPluginRuntimeDependencies(gatewayDir);
+  if (stagedDeps.length === 0) {
+    return;
+  }
+
+  const rootNodeModules = path.join(gatewayDir, "node_modules");
+  const extensionsDir = path.join(gatewayDir, "node_modules", "openclaw", "extensions");
+  let copiedCount = 0;
+
+  for (const dep of stagedDeps) {
+    const destDir = path.join(rootNodeModules, ...dep.name.split("/"));
+    if (fs.existsSync(destDir)) {
+      continue;
+    }
+
+    let sourceDir = null;
+    for (const entry of fs.readdirSync(extensionsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const candidateDir = path.join(extensionsDir, entry.name, "node_modules", ...dep.name.split("/"));
+      if (fs.existsSync(candidateDir)) {
+        sourceDir = candidateDir;
+        break;
+      }
+    }
+
+    if (!sourceDir) {
+      continue;
+    }
+
+    ensureDir(path.dirname(destDir));
+    copyDirSync(sourceDir, destDir);
+    copiedCount += 1;
+  }
+
+  if (copiedCount > 0) {
+    log(`已提升 ${copiedCount} 个 bundled 插件运行时依赖到 gateway/node_modules`);
+  }
+}
+
 // 读取 openclaw dist/extensions 下声明需要提升到宿主 node_modules 的运行时依赖。
 function collectOpenclawStagedRuntimeDependencies(gatewayDir) {
   const extensionsDir = path.join(gatewayDir, "node_modules", "openclaw", "dist", "extensions");
@@ -1126,6 +1198,7 @@ function installDependencies(opts, gatewayDir) {
     // 即使复用缓存依赖，也要执行最新裁剪规则，避免历史产物遗留冗余文件
     pruneNodeModules(nmDir);
     stageOpenclawRuntimeDependencies(gatewayDir);
+    stageBundledPluginRuntimeDependencies(gatewayDir);
     pruneDarwinUniversalNativePackages(nmDir, opts.platform);
     pruneLlamaPackages(nmDir);
     pruneDanglingBinLinks(nmDir);
@@ -1162,6 +1235,7 @@ function installDependencies(opts, gatewayDir) {
   const nmDir = path.join(gatewayDir, "node_modules");
   pruneNodeModules(nmDir);
   stageOpenclawRuntimeDependencies(gatewayDir);
+  stageBundledPluginRuntimeDependencies(gatewayDir);
   pruneDarwinUniversalNativePackages(nmDir, opts.platform);
   pruneLlamaPackages(nmDir);
   pruneDanglingBinLinks(nmDir);
@@ -1188,8 +1262,8 @@ function patchWindowsOpenclawArtifacts(gatewayDir, platform = "win32") {
   const gatewayCliResult = patchWindowsOpenclawFiles(
       distDir,
       gatewayCliFiles,
-      injectGatewayRespawnWindowsHide,
-      hasGatewayRespawnWindowsHide
+      injectGatewayCliPatches,
+      hasGatewayCliPatches
   );
 
   if (execFiles.length === 0 || execResult.ready === 0) {
@@ -1240,6 +1314,11 @@ function hasExecWindowsHide(source) {
 }
 
 // respawn 已被 OPENCLAW_NO_RESPAWN 大多压住，但这里补上更稳，避免旁路重新污染主进程树。
+function injectGatewayCliPatches(source) {
+  const withWindowsHide = injectGatewayRespawnWindowsHide(source);
+  return disableGatewayModelPricingBootstrap(withWindowsHide);
+}
+
 function injectGatewayRespawnWindowsHide(source) {
   const eol = source.includes("\r\n") ? "\r\n" : "\n";
   return source.replace(
@@ -1248,7 +1327,18 @@ function injectGatewayRespawnWindowsHide(source) {
   );
 }
 
+function disableGatewayModelPricingBootstrap(source) {
+  return source.replace(
+      /stopModelPricingRefresh = !minimalTestGateway && process\.env\.VITEST !== "1" \? startGatewayModelPricingRefresh\(\{ config: cfgAtStart \}\) : \(\) => \{\};/,
+      'stopModelPricingRefresh = () => {};'
+  );
+}
+
 // 幂等校验：已打过补丁的 gateway-cli 允许重复复用，不重复报错。
+function hasGatewayCliPatches(source) {
+  return hasGatewayRespawnWindowsHide(source) && /stopModelPricingRefresh = \(\) => \{\};/.test(source);
+}
+
 function hasGatewayRespawnWindowsHide(source) {
   return /spawn\(process\.execPath, args, \{[\s\S]*?windowsHide:\s*true[\s\S]*?env: process\.env,/.test(source);
 }

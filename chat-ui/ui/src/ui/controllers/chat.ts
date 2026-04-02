@@ -53,37 +53,54 @@ export type ChatEventPayload = {
   errorMessage?: string;
 };
 
+const inFlightChatHistory = new Map<string, Promise<void>>();
+
 export async function loadChatHistory(state: ChatState) {
   if (!state.client || !state.connected) {
     return;
   }
   const requestSessionKey = state.sessionKey;
+  const existing = inFlightChatHistory.get(requestSessionKey);
+  if (existing) {
+    console.debug(`[chat][timing] loadChatHistory join session=${requestSessionKey}`);
+    await existing;
+    return;
+  }
+  const startedAt = performance.now();
+  console.debug(`[chat][timing] loadChatHistory start session=${requestSessionKey}`);
   state.chatLoading = true;
   state.lastError = null;
-  try {
-    const res = await state.client.request<{ messages?: Array<unknown>; thinkingLevel?: string }>(
-      "chat.history",
-      {
-        sessionKey: requestSessionKey,
-        limit: 200,
-      },
-    );
-    if (state.sessionKey !== requestSessionKey) {
-      return;
+  const task = (async () => {
+    try {
+      const res = await state.client.request<{ messages?: Array<unknown>; thinkingLevel?: string }>(
+        "chat.history",
+        {
+          sessionKey: requestSessionKey,
+          limit: 200,
+        },
+      );
+      if (state.sessionKey !== requestSessionKey) {
+        return;
+      }
+      const raw = Array.isArray(res.messages) ? res.messages : [];
+      state.chatMessages = deduplicateDeliveryMirrors(raw);
+      state.chatThinkingLevel = res.thinkingLevel ?? null;
+      console.debug(`[chat][timing] loadChatHistory done in ${Math.round(performance.now() - startedAt)}ms session=${requestSessionKey} messages=${raw.length}`);
+    } catch (err) {
+      if (state.sessionKey !== requestSessionKey) {
+        return;
+      }
+      console.warn(`[chat][timing] loadChatHistory failed after ${Math.round(performance.now() - startedAt)}ms session=${requestSessionKey}`, err);
+      state.lastError = String(err);
+    } finally {
+      inFlightChatHistory.delete(requestSessionKey);
+      if (state.sessionKey === requestSessionKey) {
+        state.chatLoading = false;
+      }
     }
-    const raw = Array.isArray(res.messages) ? res.messages : [];
-    state.chatMessages = deduplicateDeliveryMirrors(raw);
-    state.chatThinkingLevel = res.thinkingLevel ?? null;
-  } catch (err) {
-    if (state.sessionKey !== requestSessionKey) {
-      return;
-    }
-    state.lastError = String(err);
-  } finally {
-    if (state.sessionKey === requestSessionKey) {
-      state.chatLoading = false;
-    }
-  }
+  })();
+  inFlightChatHistory.set(requestSessionKey, task);
+  await task;
 }
 
 function dataUrlToBase64(dataUrl: string): { content: string; mimeType: string } | null {
@@ -122,6 +139,8 @@ export async function sendChatMessage(
   }
 
   const now = Date.now();
+  const startedAt = performance.now();
+  console.debug(`[chat][timing] chat.send prepare session=${state.sessionKey} chars=${msg.length} images=${imageAttachments.length} files=${fileAttachments.length}`);
 
   // 构建用户消息内容块（用于本地 UI 显示）
   const contentBlocks: Array<{ type: string; text?: string; source?: unknown }> = [];
@@ -171,6 +190,7 @@ export async function sendChatMessage(
     : undefined;
 
   try {
+    console.debug(`[chat][timing] chat.send request start session=${state.sessionKey} runId=${runId}`);
     await state.client.request("chat.send", {
       sessionKey: state.sessionKey,
       message: msg,
@@ -179,9 +199,11 @@ export async function sendChatMessage(
       attachments: apiAttachments,
       ...(thinkingLevel && thinkingLevel !== "off" ? { thinking: thinkingLevel } : {}),
     });
+    console.info(`[chat][timing] chat.send ack in ${Math.round(performance.now() - startedAt)}ms session=${state.sessionKey} runId=${runId}`);
     return runId;
   } catch (err) {
     const error = String(err);
+    console.warn(`[chat][timing] chat.send failed after ${Math.round(performance.now() - startedAt)}ms session=${state.sessionKey} runId=${runId}`, err);
     state.chatRunId = null;
     state.chatStream = null;
     state.chatStreamStartedAt = null;
@@ -238,6 +260,11 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     const next = extractText(payload.message);
     if (typeof next === "string") {
       const current = state.chatStream ?? "";
+      if (!current && next.trim().length > 0 && state.chatStreamStartedAt != null) {
+        console.info(
+          `[chat][timing] first delta in ${Math.round(performance.now() - state.chatStreamStartedAt)}ms session=${state.sessionKey} runId=${payload.runId}`,
+        );
+      }
       if (!current || next.length >= current.length) {
         state.chatStream = next;
       }

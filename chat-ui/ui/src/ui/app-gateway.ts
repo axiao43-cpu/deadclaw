@@ -156,9 +156,8 @@ export function connectGateway(host: GatewayHost) {
       void loadAssistantIdentity(host as unknown as OpenClawApp);
       // 加载已配置模型列表（用于 per-session 模型选择器）
       void (host as unknown as OpenClawApp).loadConfiguredModels();
-      void loadAgents(host as unknown as OpenClawApp);
-      void loadNodes(host as unknown as OpenClawApp, { quiet: true });
-      void loadDevices(host as unknown as OpenClawApp, { quiet: true });
+      // 只刷新当前 tab，避免刚连上时把 nodes/devices/agents/chat.history 一次性全部压到同一个 RPC 通道里，
+      // 导致首条 chat.send 被前面的慢请求阻塞。
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
       // 注册定时轮询并启动客户端定时器
       registerTickHandler("cron", () => loadCronJobs(host as unknown as Parameters<typeof loadCronJobs>[0]));

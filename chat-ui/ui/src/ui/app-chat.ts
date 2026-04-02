@@ -182,6 +182,8 @@ async function sendChatMessageNow(
     refreshSessions?: boolean;
   },
 ) {
+  const startedAt = performance.now();
+  console.debug(`[chat][timing] sendChatMessageNow start session=${host.sessionKey} chars=${message.trim().length}`);
   resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
   const runId = await sendChatMessage(host as unknown as OpenClawApp, message, opts?.attachments, (host as any).thinkingLevel);
   const ok = Boolean(runId);
@@ -211,6 +213,7 @@ async function sendChatMessageNow(
   if (ok && opts?.refreshSessions && runId) {
     host.refreshSessionsAfterChat.add(runId);
   }
+  console.debug(`[chat][timing] sendChatMessageNow end in ${Math.round(performance.now() - startedAt)}ms session=${host.sessionKey} ok=${ok} runId=${runId ?? "null"}`);
   return ok;
 }
 
@@ -241,6 +244,7 @@ export async function handleSendChat(
   messageOverride?: string,
   opts?: { restoreDraft?: boolean },
 ) {
+  const clickStartedAt = performance.now();
   if (!host.connected) {
     return false;
   }
@@ -268,10 +272,12 @@ export async function handleSendChat(
   }
 
   if (isChatBusy(host)) {
+    console.debug(`[chat][timing] handleSendChat queued after ${Math.round(performance.now() - clickStartedAt)}ms session=${host.sessionKey}`);
     enqueueChatMessage(host, message, attachmentsToSend, refreshSessions);
     return true;
   }
 
+  console.debug(`[chat][timing] handleSendChat dispatch after ${Math.round(performance.now() - clickStartedAt)}ms session=${host.sessionKey}`);
   const ok = await sendChatMessageNow(host, message, {
     previousDraft: messageOverride == null ? previousDraft : undefined,
     restoreDraft: Boolean(messageOverride && opts?.restoreDraft),
@@ -280,6 +286,7 @@ export async function handleSendChat(
     restoreAttachments: Boolean(messageOverride && opts?.restoreDraft),
     refreshSessions,
   });
+  console.debug(`[chat][timing] handleSendChat done in ${Math.round(performance.now() - clickStartedAt)}ms session=${host.sessionKey} ok=${ok}`);
   return ok;
 }
 

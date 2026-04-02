@@ -40,6 +40,8 @@ export type GatewayHelloOk = {
 };
 
 type Pending = {
+  method: string;
+  startedAt: number;
   resolve: (value: unknown) => void;
   reject: (err: unknown) => void;
 };
@@ -165,7 +167,8 @@ export class GatewayBrowserClient {
     let deviceIdentity: Awaited<ReturnType<typeof loadOrCreateDeviceIdentity>> | null = null;
     let canFallbackToShared = false;
     let authToken = this.opts.token;
-    console.debug("[gateway] begin sendConnect", {
+    const connectStartedAt = performance.now();
+    console.debug("[gateway][timing] begin sendConnect", {
       hasSecureContext: isSecureContext,
       hasToken: Boolean(authToken),
       hasPassword: Boolean(this.opts.password),
@@ -242,7 +245,7 @@ export class GatewayBrowserClient {
 
     void this.request<GatewayHelloOk>("connect", params)
       .then((hello) => {
-        console.info("[gateway] connect response ok");
+        console.info(`[gateway][timing] connect response ok in ${Math.round(performance.now() - connectStartedAt)}ms`);
         if (hello?.auth?.deviceToken && deviceIdentity) {
           storeDeviceAuthToken({
             deviceId: deviceIdentity.deviceId,
@@ -255,7 +258,7 @@ export class GatewayBrowserClient {
         this.opts.onHello?.(hello);
       })
       .catch((err) => {
-        console.error("[gateway] connect request failed", err);
+        console.error(`[gateway][timing] connect request failed after ${Math.round(performance.now() - connectStartedAt)}ms`, err);
         if (canFallbackToShared && deviceIdentity) {
           clearDeviceAuthToken({ deviceId: deviceIdentity.deviceId, role });
         }
@@ -307,9 +310,12 @@ export class GatewayBrowserClient {
         return;
       }
       this.pending.delete(res.id);
+      const elapsed = Math.round(performance.now() - pending.startedAt);
       if (res.ok) {
+        console.debug(`[gateway][timing] response ${pending.method} ok in ${elapsed}ms`);
         pending.resolve(res.payload);
       } else {
+        console.warn(`[gateway][timing] response ${pending.method} failed in ${elapsed}ms`, res.error);
         pending.reject(new Error(res.error?.message ?? "request failed"));
       }
       return;
@@ -322,12 +328,13 @@ export class GatewayBrowserClient {
       return Promise.reject(new Error("gateway not connected"));
     }
     const id = generateUUID();
+    const startedAt = performance.now();
     const frame = { type: "req", id, method, params };
     const p = new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: (v) => resolve(v as T), reject });
+      this.pending.set(id, { method, startedAt, resolve: (v) => resolve(v as T), reject });
     });
     this.ws.send(JSON.stringify(frame));
-    console.debug("[gateway] request sent", method);
+    console.debug(`[gateway][timing] request sent ${method}`);
     return p;
   }
 

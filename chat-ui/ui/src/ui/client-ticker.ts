@@ -34,11 +34,10 @@ export function unregisterTickHandler(name: string): void {
   handlers.delete(name);
 }
 
-// 启动定时器（幂等），立即执行一轮所有回调
+// 启动定时器（幂等），等待下一个 tick 再执行回调
 export function startTicker(): void {
   if (timerId !== null) return;
   timerId = window.setInterval(() => void runAllHandlers(), TICK_INTERVAL_MS);
-  void runAllHandlers();
 }
 
 // 停止定时器
