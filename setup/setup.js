@@ -8,8 +8,8 @@
   const FIXED_PROVIDER = {
     provider: "custom",
     placeholder: "sk-...",
-    platformUrl: "https://m.tb.cn/h.iiOxWln?tk=cPwj5bEZqw",
-    docsUrl: "https://m.tb.cn/h.iiOxWln?tk=cPwj5bEZqw",
+    platformUrl: "https://www.goofish.com/item?id=1035597570254",
+    docsUrl: "https://www.goofish.com/item?id=1035597570254",
     baseUrl: "http://www.deadclaw.icu:3300/v1",
     api: "openai-completions",
     models: [],
