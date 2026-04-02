@@ -15,11 +15,15 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: 构建 macOS arm64
+        shell: bash
         env:
           npm_config_registry: https://registry.npmjs.org/
           npm_config_electron_builder_binaries_mirror: https://github.com/electron-userland/electron-builder-binaries/releases/download/
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: npm run dist:mac:arm64
+          ONECLAW_GATEWAY_ASAR: "1"
+        run: |
+          ulimit -n 4096 || true
+          npm run dist:mac:arm64
       - name: 清理 blockmap
         run: find out/darwin-arm64 -type f -name "*.blockmap" -delete
       - uses: actions/upload-artifact@v4
@@ -41,11 +45,15 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: 构建 macOS x64
+        shell: bash
         env:
           npm_config_registry: https://registry.npmjs.org/
           npm_config_electron_builder_binaries_mirror: https://github.com/electron-userland/electron-builder-binaries/releases/download/
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: npm run dist:mac:x64
+          ONECLAW_GATEWAY_ASAR: "1"
+        run: |
+          ulimit -n 4096 || true
+          npm run dist:mac:x64
       - name: 清理 blockmap
         run: find out/darwin-x64 -type f -name "*.blockmap" -delete
       - uses: actions/upload-artifact@v4
