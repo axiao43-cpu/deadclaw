@@ -13,6 +13,7 @@ const fs = require("fs");
 const path = require("path");
 const https = require("https");
 const zlib = require("zlib");
+const asar = require("@electron/asar");
 const { execSync } = require("child_process");
 const {
   normalizeSemverText,
@@ -1822,12 +1823,38 @@ function generateEntryAndBuildInfo(gatewayDir, platform, arch) {
   log("已生成 build-info.json");
 }
 
+async function maybePackGatewayAsar(targetPaths) {
+  if (process.env.ONECLAW_GATEWAY_ASAR !== "1") {
+    return;
+  }
+
+  const gatewayDir = targetPaths.gatewayDir;
+  const asarPath = path.join(targetPaths.targetBase, "gateway.asar");
+  const unpackedDir = path.join(targetPaths.targetBase, "gateway.asar.unpacked");
+
+  cleanupDirBestEffort(asarPath, "gateway.asar");
+  cleanupDirBestEffort(unpackedDir, "gateway.asar.unpacked");
+
+  log("Step 5.5: 打包 gateway.asar");
+  await asar.createPackageWithOptions(gatewayDir, asarPath, {
+    unpack: "{**/*.node,**/extensions/**/*}",
+  });
+
+  if (!fs.existsSync(asarPath)) {
+    die(`gateway.asar 生成失败: ${asarPath}`);
+  }
+
+  const sizeMB = (fs.statSync(asarPath).size / 1048576).toFixed(1);
+  log(`已生成 gateway.asar (${sizeMB} MB)`);
+}
+
 // 验证目标目录关键文件是否存在
 function verifyOutput(targetPaths, platform) {
   log("正在验证输出文件...");
 
   const nodeExe = platform === "darwin" ? "node" : "node.exe";
   const targetRel = path.relative(ROOT, targetPaths.targetBase);
+  const useAsar = process.env.ONECLAW_GATEWAY_ASAR === "1";
 
   // macOS npm 在 vendor/npm/，Windows npm 在 node_modules/npm/
   const npmDir = platform === "darwin"
@@ -1837,21 +1864,25 @@ function verifyOutput(targetPaths, platform) {
   const required = [
     path.join(targetRel, "runtime", nodeExe),
     npmDir,
-    path.join(targetRel, "gateway", "gateway-entry.mjs"),
-    path.join(targetRel, "gateway", "node_modules", "openclaw", "openclaw.mjs"),
-    path.join(targetRel, "gateway", "node_modules", "openclaw", "dist", "entry.js"),
-    path.join(targetRel, "gateway", "node_modules", "openclaw", "dist", "control-ui", "index.html"),
-    path.join(targetRel, "gateway", "node_modules", "clawhub", "bin", "clawdhub.js"),
     path.join(targetRel, "build-config.json"),
     path.join(targetRel, "app-icon.png"),
   ];
 
-  required.push(
+  if (useAsar) {
+    required.push(path.join(targetRel, "gateway.asar"));
+  } else {
+    required.push(
+      path.join(targetRel, "gateway", "gateway-entry.mjs"),
+      path.join(targetRel, "gateway", "node_modules", "openclaw", "openclaw.mjs"),
+      path.join(targetRel, "gateway", "node_modules", "openclaw", "dist", "entry.js"),
+      path.join(targetRel, "gateway", "node_modules", "openclaw", "dist", "control-ui", "index.html"),
+      path.join(targetRel, "gateway", "node_modules", "clawhub", "bin", "clawdhub.js"),
       path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "kimi-search", "openclaw.plugin.json"),
       path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "qqbot", "openclaw.plugin.json"),
       path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "dingtalk-connector", "openclaw.plugin.json"),
       path.join(targetRel, "gateway", "node_modules", "openclaw", "extensions", "wecom-openclaw-plugin", "openclaw.plugin.json"),
-  );
+    );
+  }
 
   let allOk = true;
   for (const rel of required) {
@@ -1922,6 +1953,10 @@ async function main() {
   // Step 5: 生成入口文件和构建信息
   log("Step 5: 生成入口文件和构建信息");
   generateEntryAndBuildInfo(targetPaths.gatewayDir, opts.platform, opts.arch);
+
+  console.log();
+
+  await maybePackGatewayAsar(targetPaths);
 
   console.log();
 
