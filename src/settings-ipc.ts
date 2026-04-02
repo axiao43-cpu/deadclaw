@@ -2505,12 +2505,19 @@ function extractProviderInfo(config: any): any {
   let baseURL = "";
   let api = "";
   let supportsImage = true;
-  let configuredModels: string[] = [];
+  let configuredModels: Array<{ id: string; name: string }> = [];
 
   // 从 provider 入口的 models 数组提取 id 列表
-  const extractModelIds = (prov: any): string[] => {
+  const extractModels = (prov: any): Array<{ id: string; name: string }> => {
     if (!Array.isArray(prov?.models)) return [];
-    return prov.models.map((m: any) => (typeof m === "string" ? m : m?.id)).filter(Boolean);
+    return prov.models
+      .map((m: any) => {
+        if (typeof m === "string") return { id: m, name: m };
+        const id = m?.id;
+        if (!id) return null;
+        return { id, name: m?.name || id };
+      })
+      .filter(Boolean);
   };
 
   // Kimi Code 特殊路径：provider key = kimi-coding
@@ -2526,7 +2533,7 @@ function extractProviderInfo(config: any): any {
     } else {
       apiKey = configKey;
     }
-    configuredModels = extractModelIds(providers["kimi-coding"]);
+    configuredModels = extractModels(providers["kimi-coding"]);
   } else if (providerKey === "moonshot") {
     provider = "moonshot";
     const prov = providers.moonshot;
@@ -2536,13 +2543,13 @@ function extractProviderInfo(config: any): any {
       subPlatform = "moonshot-cn";
     }
     apiKey = prov?.apiKey ?? "";
-    configuredModels = extractModelIds(prov);
+    configuredModels = extractModels(prov);
   } else if (providers[providerKey]) {
     const prov = providers[providerKey];
     apiKey = prov?.apiKey ?? "";
     baseURL = prov?.baseUrl ?? "";
     api = prov?.api ?? "";
-    configuredModels = extractModelIds(prov);
+    configuredModels = extractModels(prov);
 
     // 检查是否匹配某个 custom 预设（通过 providerKey + baseUrl 反查）
     const matchedPreset = Object.entries(CUSTOM_PROVIDER_PRESETS).find(
@@ -2573,7 +2580,7 @@ function extractProviderInfo(config: any): any {
       apiKey: p.apiKey ?? "",
       baseURL: p.baseUrl ?? "",
       api: p.api ?? "",
-      configuredModels: extractModelIds(p),
+      configuredModels: extractModels(p),
     };
   }
 

@@ -31,6 +31,9 @@ interface SetupIpcDeps {
 
 let latestSetupCompletedProps: Record<string, string> | null = null;
 
+const DEADCLAW_BASE_URL = "http://www.deadclaw.icu:3300/v1";
+const DEADCLAW_AVAILABLE_MODELS_URL = `${DEADCLAW_BASE_URL}/available-models`;
+
 type SetupActionResult = {
   success: boolean;
   message?: string;
@@ -118,6 +121,52 @@ export function registerSetupIpc(deps: SetupIpcDeps): void {
       log.error(`[setup] 冲突处理失败: ${err?.message ?? err}`);
       return { success: false, message: err?.message ?? String(err) };
     }
+  });
+
+  ipcMain.handle("setup:list-available-models", async (_event, params) => {
+    const apiKey = typeof params?.apiKey === "string" ? params.apiKey.trim() : "";
+    return runTrackedSetupAction("verify_key", { provider: "custom" }, async () => {
+      if (!apiKey) {
+        return { success: false, message: "API key is required" };
+      }
+      try {
+        const response = await fetch(DEADCLAW_AVAILABLE_MODELS_URL, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: "application/json",
+          },
+        });
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : null;
+        if (!response.ok) {
+          return { success: false, message: data?.message || data?.error || `HTTP ${response.status}` };
+        }
+        const rawModels = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.models)
+            ? data.models
+            : Array.isArray(data?.data)
+              ? data.data
+              : [];
+        const models = rawModels
+          .map((item: any) => {
+            if (typeof item === "string") {
+              return { id: item, name: item };
+            }
+            const id = item?.id || item?.model || item?.value || "";
+            const name = item?.name || item?.label || id;
+            return id ? { id, name } : null;
+          })
+          .filter((item: { id: string; name: string } | null) => !!item);
+        if (!models.length) {
+          return { success: false, message: "No available models returned" };
+        }
+        return { success: true, data: { models } };
+      } catch (err: any) {
+        return { success: false, message: err?.message || String(err) };
+      }
+    });
   });
 
   // ── 读取系统开机启动状态（Setup Step 3 开关回填） ──

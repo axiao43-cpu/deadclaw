@@ -1,5 +1,4 @@
 import { ChildProcess, spawn } from "child_process";
-import * as http from "http";
 import * as path from "path";
 import * as fs from "fs";
 import { app } from "electron";
@@ -21,6 +20,7 @@ import {
   resolveUserStateDir,
 } from "./constants";
 import { uninstallGatewayDaemon, getPortPid } from "./install-detector";
+import { probeGatewayReady } from "./gateway-rpc";
 
 // 诊断日志（固定写入 ~/.openclaw/gateway.log，便于用户定位）
 const LOG_PATH = resolveGatewayLogPath();
@@ -183,8 +183,8 @@ export class GatewayProcess {
         // OneClaw 用 USERPROFILE 写配置，openclaw 用 HOME 优先读配置，
         // 显式传入 OPENCLAW_STATE_DIR 消除歧义。
         OPENCLAW_STATE_DIR: resolveUserStateDir(),
-        // 告诉 openclaw 安装根目录，使 extensions 路径解析不依赖 __dirname（asar 内会失败）
-        OPENCLAW_INSTALL_ROOT: resolveResourcesPath(),
+        // OneClaw 本地桌面壳不依赖局域网 Bonjour 广播；禁用可避免 openclaw 2026.3.31 在 Windows 上的 ciao 重探测崩溃。
+        OPENCLAW_DISABLE_BONJOUR: "1",
         OPENCLAW_GATEWAY_TOKEN: this.token,
         OPENCLAW_NPM_BIN: resolveNpmBin(),
         PATH: envPath,
@@ -336,19 +336,10 @@ export class GatewayProcess {
     await this.start();
   }
 
-  // HTTP 探测根路径（Control UI）
-  private probeHealth(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const req = http.get(`http://127.0.0.1:${this.port}/`, (res) => {
-        resolve(res.statusCode === 200);
-        res.resume();
-      });
-      req.on("error", () => resolve(false));
-      req.setTimeout(2000, () => {
-        req.destroy();
-        resolve(false);
-      });
-    });
+  // WebSocket 握手成功即认为 gateway 已就绪；避免把额外 RPC scope 差异误判为启动失败。
+  private async probeHealth(): Promise<boolean> {
+    const result = await probeGatewayReady(this.token, 4000);
+    return result.ok;
   }
 
   // 轮询等待健康

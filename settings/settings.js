@@ -905,6 +905,8 @@
     btnResetConfigSpinner: $("#btnResetConfig .btn-spinner"),
   };
 
+  const HAS_PROVIDER_SECTION = !!($("#apiKey") && $("#modelSelect") && $("#msgBox") && $("#btnSave"));
+
   // ── 状态 ──
 
   let currentProvider = "moonshot";
@@ -1148,7 +1150,7 @@
     els.apiKeyInput.value = saved.apiKey || "";
 
     // 回填模型列表和选中项
-    if (provider !== "custom" && saved.configuredModels && saved.configuredModels.length) {
+      if (provider !== "custom" && saved.configuredModels && saved.configuredModels.length) {
       var merged = buildMergedModelList(saved.configuredModels, provider, subPlatform);
       if (merged.length) populateModels(merged);
     }
@@ -1165,7 +1167,7 @@
 
   function switchProvider(provider) {
     currentProvider = provider;
-    if (!els.providerTabs || !els.apiKeyInput) {
+    if (!HAS_PROVIDER_SECTION || !els.providerTabs || !els.apiKeyInput) {
       return;
     }
     const config = PROVIDERS[provider];
@@ -1376,8 +1378,9 @@
     els.modelSelect.innerHTML = "";
     models.forEach((m) => {
       var opt = document.createElement("option");
-      opt.value = m;
-      opt.textContent = m;
+      var model = typeof m === "string" ? { id: m, name: m } : m;
+      opt.value = model.id;
+      opt.textContent = model.name || model.id;
       els.modelSelect.appendChild(opt);
     });
   }
@@ -1401,8 +1404,18 @@
   function mergePresetAndConfigModels(presetModels, configModels) {
     var seen = {};
     var result = [];
-    presetModels.forEach(function (m) { seen[m] = true; result.push(m); });
-    configModels.forEach(function (m) { if (!seen[m]) { result.push(m); } });
+    presetModels.forEach(function (m) {
+      var model = typeof m === "string" ? { id: m, name: m } : m;
+      if (!model || !model.id || seen[model.id]) return;
+      seen[model.id] = true;
+      result.push(model);
+    });
+    configModels.forEach(function (m) {
+      var model = typeof m === "string" ? { id: m, name: m } : m;
+      if (!model || !model.id || seen[model.id]) return;
+      seen[model.id] = true;
+      result.push(model);
+    });
     return result;
   }
 
@@ -3814,14 +3827,25 @@
   }
 
   function buildMergedModelList(configuredModels, provider, subPlatform) {
-    // 以配置中的模型为基础
-    var models = configuredModels ? configuredModels.slice() : [];
-    // 补充预设中未出现的模型
+    var map = Object.create(null);
+    var result = [];
+
+    (configuredModels || []).forEach(function (m) {
+      var model = typeof m === "string" ? { id: m, name: m } : m;
+      if (!model || !model.id || map[model.id]) return;
+      map[model.id] = true;
+      result.push({ id: model.id, name: model.name || model.id });
+    });
+
     var presets = getPresetModels(provider, subPlatform);
     presets.forEach(function (m) {
-      if (models.indexOf(m) === -1) models.push(m);
+      var model = typeof m === "string" ? { id: m, name: m } : m;
+      if (!model || !model.id || map[model.id]) return;
+      map[model.id] = true;
+      result.push({ id: model.id, name: model.name || model.id });
     });
-    return models;
+
+    return result;
   }
 
   // 取对应 provider/subPlatform 的预设模型列表
@@ -3855,7 +3879,7 @@
         savedProviders = data.savedProviders;
       }
 
-      if (!els.providerTabs || !els.apiKeyInput) {
+      if (!HAS_PROVIDER_SECTION || !els.providerTabs || !els.apiKeyInput) {
         return;
       }
 
@@ -4013,7 +4037,7 @@
   // 恢复配置后，重载所有设置面板数据，防止旧 UI 状态覆盖新配置。
   async function refreshAllSettingsViewsAfterRestore() {
     await Promise.allSettled([
-      loadCurrentConfig(),
+      HAS_PROVIDER_SECTION ? loadCurrentConfig() : Promise.resolve(),
       loadChannelConfig(),
       loadWecomConfig(),
       loadDingtalkConfig(),
@@ -4298,12 +4322,14 @@
   }
 
   function showMsg(msg, type) {
+    if (!els.msgBox) return;
     els.msgBox.textContent = msg;
     els.msgBox.className = "msg-box " + type;
   }
 
   // 非会员提示（带订阅超链接）
   function showOAuthNoMembership() {
+    if (!els.msgBox) return;
     var url = "https://kimi.com/membership/pricing?utm_source=oneclaw";
     els.msgBox.textContent = "";
     els.msgBox.className = "msg-box error";
@@ -4320,6 +4346,7 @@
   }
 
   function hideMsg() {
+    if (!els.msgBox) return;
     els.msgBox.classList.add("hidden");
     els.msgBox.textContent = "";
     els.msgBox.className = "msg-box hidden";
@@ -4327,6 +4354,7 @@
 
   function setSaving(loading) {
     saving = loading;
+    if (!els.btnSave || !els.btnSaveText || !els.btnSaveSpinner) return;
     els.btnSave.disabled = loading;
     els.btnSaveText.textContent = loading ? t("provider.saving") : t("provider.save");
     els.btnSaveSpinner.classList.toggle("hidden", !loading);
@@ -4342,82 +4370,84 @@
       });
     });
 
-    // Provider tab 切换
-    if (els.providerTabs) {
-      els.providerTabs.addEventListener("click", function (e) {
-        var tab = e.target.closest(".provider-tab");
-        if (tab) switchProvider(tab.dataset.provider);
-      });
-    }
+    if (HAS_PROVIDER_SECTION) {
+      // Provider tab 切换
+      if (els.providerTabs) {
+        els.providerTabs.addEventListener("click", function (e) {
+          var tab = e.target.closest(".provider-tab");
+          if (tab) switchProvider(tab.dataset.provider);
+        });
+      }
 
-    // Moonshot 子平台切换
-    if (els.subPlatformGroup) {
-      els.subPlatformGroup.addEventListener("change", function () {
-        if (currentProvider === "moonshot") {
-          updateModels();
-          updatePlatformLink();
-          updateOAuthVisibility();
-          // 切换子平台时回填对应配置
-          fillSavedProviderFields("moonshot", getSubPlatform());
-        }
-      });
-    }
+      // Moonshot 子平台切换
+      if (els.subPlatformGroup) {
+        els.subPlatformGroup.addEventListener("change", function () {
+          if (currentProvider === "moonshot") {
+            updateModels();
+            updatePlatformLink();
+            updateOAuthVisibility();
+            // 切换子平台时回填对应配置
+            fillSavedProviderFields("moonshot", getSubPlatform());
+          }
+        });
+      }
 
-    // Custom 预设切换
-    if (els.customPreset) {
-      els.customPreset.addEventListener("change", function () {
-        applyCustomPreset(els.customPreset.value);
-      });
-    }
+      // Custom 预设切换
+      if (els.customPreset) {
+        els.customPreset.addEventListener("change", function () {
+          applyCustomPreset(els.customPreset.value);
+        });
+      }
 
-    // 模型下拉切换 → 控制自定义模型输入框显隐
-    if (els.modelSelect) {
-      els.modelSelect.addEventListener("change", handleModelSelectChange);
-    }
+      // 模型下拉切换 → 控制自定义模型输入框显隐
+      if (els.modelSelect) {
+        els.modelSelect.addEventListener("change", handleModelSelectChange);
+      }
 
-    // 平台链接
-    if (els.platformLink) {
-      els.platformLink.addEventListener("click", function (e) {
-        e.preventDefault();
-        var url = els.platformLink.dataset.url;
-        if (url && window.oneclaw && window.oneclaw.openExternal) {
-          window.oneclaw.openExternal(url);
-        }
-      });
-    }
+      // 平台链接
+      if (els.platformLink) {
+        els.platformLink.addEventListener("click", function (e) {
+          e.preventDefault();
+          var url = els.platformLink.dataset.url;
+          if (url && window.oneclaw && window.oneclaw.openExternal) {
+            window.oneclaw.openExternal(url);
+          }
+        });
+      }
 
-    // 密码可见性
-    if (els.btnOAuth) {
-      els.btnOAuth.addEventListener("click", handleOAuthLogin);
-    }
-    if (els.btnOAuthCancel) {
-      els.btnOAuthCancel.addEventListener("click", handleOAuthCancel);
-    }
-    if (els.btnOAuthLogout) {
-      els.btnOAuthLogout.addEventListener("click", handleOAuthLogout);
-    }
-    if (els.btnUsageRefresh) {
-      els.btnUsageRefresh.addEventListener("click", loadUsage);
-    }
-    if (els.btnToggleKey) {
-      els.btnToggleKey.addEventListener("click", togglePasswordVisibility);
-    }
+      // 密码可见性
+      if (els.btnOAuth) {
+        els.btnOAuth.addEventListener("click", handleOAuthLogin);
+      }
+      if (els.btnOAuthCancel) {
+        els.btnOAuthCancel.addEventListener("click", handleOAuthCancel);
+      }
+      if (els.btnOAuthLogout) {
+        els.btnOAuthLogout.addEventListener("click", handleOAuthLogout);
+      }
+      if (els.btnUsageRefresh) {
+        els.btnUsageRefresh.addEventListener("click", loadUsage);
+      }
+      if (els.btnToggleKey) {
+        els.btnToggleKey.addEventListener("click", togglePasswordVisibility);
+      }
 
-    // 模型列表：新增按钮
-    if (els.addModelBtn) {
-      els.addModelBtn.addEventListener("click", function () { enterAddMode(); });
-    }
-    // 模型列表：删除按钮
-    // 保存
-    if (els.btnSave) {
-      els.btnSave.addEventListener("click", handleSave);
-    }
+      // 模型列表：新增按钮
+      if (els.addModelBtn) {
+        els.addModelBtn.addEventListener("click", function () { enterAddMode(); });
+      }
+      // 模型列表：删除按钮
+      // 保存
+      if (els.btnSave) {
+        els.btnSave.addEventListener("click", handleSave);
+      }
 
-    // Enter 键保存
-    if (els.apiKeyInput) {
-      els.apiKeyInput.addEventListener("keydown", function (e) {
-        if (e.key === "Enter") handleSave();
-      });
+      // Enter 键保存
+      if (els.apiKeyInput) {
+        els.apiKeyInput.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") handleSave();
+        });
+      }
     }
 
     // 通道启用指示灯绑定
@@ -4876,8 +4906,10 @@
     switchTab(initialTab || "channels");
     switchChatPlatform(initialChatPlatform || "feishu");
     applyRecoveryNotice(startupNotice);
-    loadCurrentConfig();
-    renderModelList();
+    if (HAS_PROVIDER_SECTION) {
+      loadCurrentConfig();
+      renderModelList();
+    }
     loadChannelConfig();
     loadWecomConfig();
     loadDingtalkConfig();

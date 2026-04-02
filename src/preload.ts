@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld("oneclaw", {
     ipcRenderer.invoke("setup:verify-key", params),
   saveConfig: (params: Record<string, unknown>) =>
     ipcRenderer.invoke("setup:save-config", params),
+  setupListAvailableModels: (params: Record<string, unknown>) =>
+    ipcRenderer.invoke("setup:list-available-models", params),
   setupGetLaunchAtLogin: () => ipcRenderer.invoke("setup:get-launch-at-login"),
   completeSetup: (params?: Record<string, unknown>) => ipcRenderer.invoke("setup:complete", params),
   detectInstallation: () => ipcRenderer.invoke("setup:detect-installation"),
