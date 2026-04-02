@@ -239,7 +239,7 @@ function setOneClawView(state: AppViewState, next: "chat" | "settings" | "skills
 }
 
 // 打开内嵌设置页时可携带目标 tab 提示，减少用户二次定位成本。
-function openSettingsView(state: AppViewState, tabHint: "channels" | null = null) {
+function openSettingsView(state: AppViewState, tabHint: "channels" | "api-key" | null = null) {
   state.settingsTabHint = tabHint;
   setOneClawView(state, "settings");
 }
@@ -862,6 +862,7 @@ export function renderApp(state: AppViewState) {
   const skillsActive = oneclawView === "skills";
   const workspaceActive = oneclawView === "workspace";
   const cronActive = oneclawView === "cron";
+  const apiKeyActive = settingsActive && state.settingsTabHint === "api-key";
   const updateBannerState = state.updateBannerState;
 
   return html`
@@ -878,6 +879,7 @@ export function renderApp(state: AppViewState) {
             skillsActive,
             workspaceActive,
             cronActive,
+            apiKeyActive,
             cronJobCount: state.cronJobs.length,
             onOpenCron: () => setOneClawView(state, "cron"),
             updateStatus: updateBannerState.status,
@@ -909,15 +911,9 @@ export function renderApp(state: AppViewState) {
             onOpenSkillStore: () => openSkillsView(state),
             onOpenWorkspace: () => openWorkspaceView(state),
             onOpenWebUI: () => void handleOpenWebUI(state),
+            onOpenApiKey: () => openSettingsView(state, "api-key"),
             errors: [chatDisabledReason, state.lastError].filter(Boolean) as string[],
             onReconnect: () => handleReconnect(state),
-            onOpenDocs: () => {
-              if (window.oneclaw?.openExternal) {
-                window.oneclaw.openExternal("https://oneclaw.cn/docs");
-              } else {
-                window.open("https://oneclaw.cn/docs", "_blank");
-              }
-            },
             onApplyUpdate: () => void handleApplyUpdate(state),
           })}
 

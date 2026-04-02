@@ -20,6 +20,7 @@ const {
   Star,
   Trash2,
   Brain,
+  BookOpen,
 } = require("lucide");
 
 const ROOT = path.resolve(__dirname, "..");
@@ -36,6 +37,7 @@ const SETTINGS_ICONS = {
   "icon-star": Star,
   "icon-trash-2": Trash2,
   "icon-brain": Brain,
+  "icon-book-open": BookOpen,
 };
 
 // setup 页面图标集
@@ -93,7 +95,7 @@ function buildSpriteMarkup(icons, spriteId) {
     })
     .join("");
 
-  return `<svg id="${spriteId}" aria-hidden="true" width="0" height="0" style="position:absolute; width:0; height:0; overflow:hidden"><defs>${symbols}</defs></svg>`;
+  return `<svg id="${spriteId}" aria-hidden="true" width="0" height="0" class="svg-sprite-root"><defs>${symbols}</defs></svg>`;
 }
 
 // 生成注入脚本

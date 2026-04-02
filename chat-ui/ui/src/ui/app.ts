@@ -676,7 +676,7 @@ export class OpenClawApp extends LitElement {
   };
   pairingApproving = false;
   pairingRejecting = false;
-  settingsTabHint: "channels" | null = null;
+  settingsTabHint: "channels" | "api-key" | null = null;
   showReleaseNotesModal = false;
   releaseNotesData: ReleaseNotesData | null = null;
   private sharePromptSendCount = 0;

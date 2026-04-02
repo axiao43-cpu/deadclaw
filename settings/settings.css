@@ -40,8 +40,8 @@
   padding: 0;
 }
 
-/* 隐藏 lucide sprite SVG（CSP 阻止了其 inline position:absolute） */
-body > svg:first-child {
+/* 隐藏 lucide sprite SVG */
+.svg-sprite-root {
   position: absolute;
   width: 0;
   height: 0;
@@ -957,6 +957,41 @@ select option {
   margin-top: auto;
   padding-top: 24px;
   padding-bottom: 32px;
+}
+
+.api-key-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.api-key-summary__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.api-key-summary__label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.api-key-summary__value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.api-key-actions-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
 }
 
 /* OAuth 登录按钮 */

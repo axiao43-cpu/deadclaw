@@ -113,6 +113,8 @@
 
   // 已保存的各 provider 配置缓存（供切换时自动回填）
   var savedProviders = {};
+  var apiKeyQuickState = null;
+  var apiKeyQuickLoaded = false;
 
   // ── 国际化 ──
 
@@ -300,7 +302,13 @@
       "nav.memory": "Memory",
       "nav.appearance": "Appearance",
       "nav.backup": "Backup & Restore",
+      "nav.apiKey": "Set API Key",
       "search.desc": "Configure web search and content fetch tools",
+      "apiKey.title": "Set API Key",
+      "apiKey.desc": "Update the API Key and model for the current default model. Saving writes to openclaw.json and restarts the Gateway.",
+      "apiKey.currentProvider": "Current Provider",
+      "apiKey.currentModel": "Current Model",
+      "apiKey.refreshModels": "Refresh model list",
       "search.enabled": "Enable",
       "search.apiKeyLabel": "API Key",
       "search.guideText": "Kimi for Coding API Key enables search",
@@ -397,6 +405,14 @@
       "about.downloading": "Downloading",
       "about.installRestart": "Install & Restart",
       "about.updateFailed": "Check failed, try again later",
+      "about.openSourceTitle": "About & Open Source",
+      "about.openSourceIntro": "DeadClaw is a modified release based on the OneClaw project.",
+      "about.copyrightNotice": "This project retains the original authors' copyright notices and continues to comply with the AGPL-3.0 license. See the LICENSE file and repository notice for details.",
+      "about.sourceAccess": "Source code is available from the original repository, the DeadClaw repository, the matching release tag for this version, and the source code links on the release/download page.",
+      "about.tagNotice": "Please use the GitHub release/tag that matches the current version number when retrieving the corresponding source code.",
+      "about.originalRepo": "Original GitHub Repository →",
+      "about.forkRepo": "DeadClaw Open Source Repository →",
+      "about.releaseLink": "Release / Source Code Page →",
       "settings.modelList": "Models",
       "settings.addModel": "+ Add Model",
       "settings.modelAlias": "Alias",
@@ -593,7 +609,13 @@
       "nav.memory": "记忆",
       "nav.appearance": "外观",
       "nav.backup": "备份恢复",
+      "nav.apiKey": "设置API KEY",
       "search.desc": "配置网页搜索和内容抓取工具",
+      "apiKey.title": "设置API KEY",
+      "apiKey.desc": "修改当前默认模型对应的 API Key 与模型，保存后会写入 openclaw.json 并重启 Gateway。",
+      "apiKey.currentProvider": "当前 Provider",
+      "apiKey.currentModel": "当前模型",
+      "apiKey.refreshModels": "刷新模型列表",
       "search.enabled": "启用状态",
       "search.apiKeyLabel": "API 密钥",
       "search.guideText": "Kimi for Coding 的 API Key 可启用搜索功能",
@@ -690,6 +712,14 @@
       "about.downloading": "下载中",
       "about.installRestart": "安装并重启",
       "about.updateFailed": "检查失败 请稍后重试",
+      "about.openSourceTitle": "关于与开源说明",
+      "about.openSourceIntro": "DeadClaw 基于 OneClaw 项目修改发布。",
+      "about.copyrightNotice": "本项目保留原作者版权声明，并继续遵循 AGPL-3.0 许可证。详细条款请查看 LICENSE 文件与仓库说明。",
+      "about.sourceAccess": "你可以通过原项目仓库、DeadClaw 开源仓库、与当前版本对应的发布 tag，以及发布/下载页面中的源码链接获取对应源码。",
+      "about.tagNotice": "获取对应源码时，请优先选择与当前版本号一致的 GitHub Release 或 tag。",
+      "about.originalRepo": "原项目 GitHub 仓库 →",
+      "about.forkRepo": "DeadClaw 开源仓库 →",
+      "about.releaseLink": "发布页 / 源码下载页 →",
       "settings.modelList": "模型列表",
       "settings.addModel": "+ 新增模型",
       "settings.modelAlias": "别名",
@@ -726,6 +756,16 @@
     apiKeyInput: $("#apiKey"),
     baseURLInput: $("#baseURL"),
     btnToggleKey: $("#btnToggleKey"),
+    apiKeyQuickCurrentProvider: $("#apiKeyCurrentProvider"),
+    apiKeyQuickCurrentModel: $("#apiKeyCurrentModel"),
+    apiKeyQuickInput: $("#apiKeyQuickInput"),
+    btnToggleQuickApiKey: $("#btnToggleQuickApiKey"),
+    apiKeyQuickModel: $("#apiKeyQuickModel"),
+    btnRefreshQuickModels: $("#btnRefreshQuickModels"),
+    apiKeyQuickMsgBox: $("#apiKeyQuickMsgBox"),
+    btnSaveQuickApiKey: $("#btnSaveQuickApiKey"),
+    btnSaveQuickApiKeyText: $("#btnSaveQuickApiKey .btn-text"),
+    btnSaveQuickApiKeySpinner: $("#btnSaveQuickApiKey .btn-spinner"),
     modelSelectGroup: $("#modelSelectGroup"),
     modelSelect: $("#modelSelect"),
     modelInputGroup: $("#modelInputGroup"),
@@ -903,6 +943,9 @@
     btnResetConfig: $("#btnResetConfig"),
     btnResetConfigText: $("#btnResetConfig .btn-text"),
     btnResetConfigSpinner: $("#btnResetConfig .btn-spinner"),
+    aboutOriginalRepoLink: $("#aboutOriginalRepoLink"),
+    aboutForkRepoLink: $("#aboutForkRepoLink"),
+    aboutReleaseLink: $("#aboutReleaseLink"),
   };
 
   const HAS_PROVIDER_SECTION = !!($("#apiKey") && $("#modelSelect") && $("#msgBox") && $("#btnSave"));
@@ -955,6 +998,8 @@
   const TAB_ALIAS_MAP = {
     channel: "channels",
     chat: "channels",
+    apikey: "api-key",
+    "api-key": "api-key",
     feishu: "channels",
     wecom: "channels",
     dingtalk: "channels",
@@ -1075,20 +1120,32 @@
     }
   }
 
+  function getTabPanelId(tabName) {
+    return "tab" + String(tabName || "")
+      .split("-")
+      .filter(Boolean)
+      .map(function (part) {
+        return part.charAt(0).toUpperCase() + part.slice(1);
+      })
+      .join("");
+  }
+
   function switchTab(tabName) {
     var rawTarget = String(tabName || "").trim();
     var target = normalizeTabName(tabName);
     var found = false;
+    var targetPanelId = "";
     els.navItems.forEach((item) => {
       if (item.dataset.tab === target) found = true;
     });
     if (!found) target = "channels";
+    targetPanelId = getTabPanelId(target);
 
     els.navItems.forEach((item) => {
       item.classList.toggle("active", item.dataset.tab === target);
     });
     els.tabPanels.forEach((panel) => {
-      panel.classList.toggle("active", panel.id === "tab" + capitalize(target));
+      panel.classList.toggle("active", panel.id === targetPanelId);
     });
 
     if (target === "channels") {
@@ -1103,10 +1160,10 @@
     if (target === "about") {
       loadAboutInfo();
     }
-  }
 
-  function capitalize(s) {
-    return s.charAt(0).toUpperCase() + s.slice(1);
+    if (target === "api-key") {
+      void loadApiKeyTabConfig();
+    }
   }
 
   // ── Provider 切换 ──
@@ -3865,6 +3922,225 @@
     return map[provider] || provider;
   }
 
+  function showApiKeyQuickMsg(msg, type) {
+    if (!els.apiKeyQuickMsgBox) return;
+    els.apiKeyQuickMsgBox.textContent = msg;
+    els.apiKeyQuickMsgBox.className = "msg-box " + type;
+  }
+
+  function hideApiKeyQuickMsg() {
+    if (!els.apiKeyQuickMsgBox) return;
+    els.apiKeyQuickMsgBox.classList.add("hidden");
+    els.apiKeyQuickMsgBox.textContent = "";
+    els.apiKeyQuickMsgBox.className = "msg-box hidden";
+  }
+
+  function setApiKeyQuickSaving(loading) {
+    if (!els.btnSaveQuickApiKey || !els.btnSaveQuickApiKeyText || !els.btnSaveQuickApiKeySpinner) return;
+    els.btnSaveQuickApiKey.disabled = loading;
+    els.btnSaveQuickApiKeyText.textContent = loading ? t("provider.saving") : t("provider.save");
+    els.btnSaveQuickApiKeySpinner.classList.toggle("hidden", !loading);
+  }
+
+  function setApiKeyQuickRefreshLoading(loading) {
+    if (!els.btnRefreshQuickModels) return;
+    els.btnRefreshQuickModels.disabled = loading;
+    els.btnRefreshQuickModels.textContent = loading ? t("provider.saving") : t("apiKey.refreshModels");
+  }
+
+  function populateApiKeyQuickModels(models, selectedModelID) {
+    if (!els.apiKeyQuickModel) return;
+    var seen = {};
+    var normalized = [];
+    (models || []).forEach(function (m) {
+      var model = typeof m === "string" ? { id: m, name: m } : m;
+      if (!model || !model.id || seen[model.id]) return;
+      seen[model.id] = true;
+      normalized.push({ id: model.id, name: model.name || model.id });
+    });
+    if (selectedModelID && !seen[selectedModelID]) {
+      normalized.push({ id: selectedModelID, name: selectedModelID });
+    }
+    els.apiKeyQuickModel.innerHTML = "";
+    normalized.forEach(function (model) {
+      var opt = document.createElement("option");
+      opt.value = model.id;
+      opt.textContent = model.name || model.id;
+      els.apiKeyQuickModel.appendChild(opt);
+    });
+    if (selectedModelID) {
+      els.apiKeyQuickModel.value = selectedModelID;
+    }
+  }
+
+  async function loadApiKeyTabConfig(force) {
+    if (!window.oneclaw?.settingsGetConfig) return;
+    if (apiKeyQuickLoaded && !force) return;
+    hideApiKeyQuickMsg();
+    try {
+      var result = await window.oneclaw.settingsGetConfig();
+      if (!result.success || !result.data) {
+        showApiKeyQuickMsg(result.message || t("error.connection"), "error");
+        return;
+      }
+      var data = result.data;
+      apiKeyQuickState = {
+        provider: data.provider || "",
+        subPlatform: data.subPlatform || "",
+        customPreset: data.customPreset || "",
+        baseURL: data.baseURL || "",
+        api: data.api || "",
+        modelID: data.modelID || "",
+        raw: data.raw || "",
+        configuredModels: Array.isArray(data.configuredModels) ? data.configuredModels : [],
+      };
+      if (data.savedProviders) {
+        savedProviders = data.savedProviders;
+      }
+      if (els.apiKeyQuickCurrentProvider) {
+        els.apiKeyQuickCurrentProvider.textContent = getProviderDisplayName(data.provider, data.subPlatform) || "-";
+      }
+      if (els.apiKeyQuickCurrentModel) {
+        els.apiKeyQuickCurrentModel.textContent = data.modelID || "-";
+      }
+      if (els.apiKeyQuickInput) {
+        els.apiKeyQuickInput.value = data.apiKey || "";
+      }
+      populateApiKeyQuickModels(apiKeyQuickState.configuredModels, apiKeyQuickState.modelID);
+      apiKeyQuickLoaded = true;
+      if (data.apiKey) {
+        void refreshApiKeyQuickModels();
+      }
+    } catch (err) {
+      showApiKeyQuickMsg(t("error.connection") + (err.message || "Unknown error"), "error");
+    }
+  }
+
+  async function refreshApiKeyQuickModels() {
+    if (!window.oneclaw?.setupListAvailableModels) return;
+    var apiKey = (els.apiKeyQuickInput && els.apiKeyQuickInput.value || "").trim();
+    if (!apiKey) {
+      showApiKeyQuickMsg(t("error.noKey"), "error");
+      return;
+    }
+    hideApiKeyQuickMsg();
+    setApiKeyQuickRefreshLoading(true);
+    try {
+      var result = await window.oneclaw.setupListAvailableModels({ apiKey: apiKey });
+      var models = Array.isArray(result && result.models)
+        ? result.models
+        : Array.isArray(result && result.data && result.data.models)
+          ? result.data.models
+          : [];
+      if (!result || !result.success || !models.length) {
+        showApiKeyQuickMsg((result && result.message) || t("error.verifyFailed"), "error");
+        return;
+      }
+      var selectedModel = (els.apiKeyQuickModel && els.apiKeyQuickModel.value) || (apiKeyQuickState && apiKeyQuickState.modelID) || "";
+      populateApiKeyQuickModels(models, selectedModel);
+      if (apiKeyQuickState) {
+        apiKeyQuickState.availableModels = models;
+      }
+    } catch (err) {
+      showApiKeyQuickMsg(t("error.connection") + (err.message || "Unknown error"), "error");
+    } finally {
+      setApiKeyQuickRefreshLoading(false);
+    }
+  }
+
+  async function handleSaveApiKeyQuick() {
+    if (!window.oneclaw?.settingsSaveProvider || !window.oneclaw?.settingsSetDefaultModel) return;
+    if (!apiKeyQuickState) {
+      await loadApiKeyTabConfig(true);
+      if (!apiKeyQuickState) return;
+    }
+    var apiKey = (els.apiKeyQuickInput && els.apiKeyQuickInput.value || "").trim();
+    var nextModelID = (els.apiKeyQuickModel && els.apiKeyQuickModel.value || "").trim();
+    if (!apiKey) {
+      showApiKeyQuickMsg(t("error.noKey"), "error");
+      return;
+    }
+    if (!nextModelID) {
+      showApiKeyQuickMsg(t("error.noModelId"), "error");
+      return;
+    }
+    hideApiKeyQuickMsg();
+    setApiKeyQuickSaving(true);
+    try {
+      var state = apiKeyQuickState;
+      var currentRaw = String(state.raw || "");
+      var slashIdx = currentRaw.indexOf("/");
+      var providerKey = slashIdx > 0 ? currentRaw.slice(0, slashIdx) : "";
+      var currentModelID = state.modelID || "";
+      var targetModelKey = providerKey && nextModelID ? providerKey + "/" + nextModelID : "";
+      var modelExists = Array.isArray(state.configuredModels) && state.configuredModels.some(function (item) {
+        return item && item.id === nextModelID;
+      });
+      if (nextModelID === currentModelID && currentRaw) {
+        var updateResult = await window.oneclaw.settingsSaveProvider({
+          provider: state.provider,
+          apiKey: apiKey,
+          modelID: nextModelID,
+          baseURL: state.baseURL || "",
+          api: state.api || "",
+          subPlatform: state.subPlatform || "",
+          customPreset: state.customPreset || "",
+          action: "update",
+          modelKey: currentRaw,
+          setAsDefault: true,
+        });
+        if (!updateResult.success) {
+          showApiKeyQuickMsg(updateResult.message || "Save failed", "error");
+          return;
+        }
+      } else if (modelExists && targetModelKey) {
+        var saveExistingResult = await window.oneclaw.settingsSaveProvider({
+          provider: state.provider,
+          apiKey: apiKey,
+          modelID: currentModelID || nextModelID,
+          baseURL: state.baseURL || "",
+          api: state.api || "",
+          subPlatform: state.subPlatform || "",
+          customPreset: state.customPreset || "",
+          action: "update",
+          modelKey: currentRaw,
+          setAsDefault: false,
+        });
+        if (!saveExistingResult.success) {
+          showApiKeyQuickMsg(saveExistingResult.message || "Save failed", "error");
+          return;
+        }
+        var setDefaultResult = await window.oneclaw.settingsSetDefaultModel({ modelKey: targetModelKey });
+        if (!setDefaultResult.success) {
+          showApiKeyQuickMsg(setDefaultResult.message || "Save failed", "error");
+          return;
+        }
+      } else {
+        var addResult = await window.oneclaw.settingsSaveProvider({
+          provider: state.provider,
+          apiKey: apiKey,
+          modelID: nextModelID,
+          baseURL: state.baseURL || "",
+          api: state.api || "",
+          subPlatform: state.subPlatform || "",
+          customPreset: state.customPreset || "",
+          action: "add",
+          setAsDefault: true,
+        });
+        if (!addResult.success) {
+          showApiKeyQuickMsg(addResult.message || "Save failed", "error");
+          return;
+        }
+      }
+      showToast(t("common.saved"));
+      await loadApiKeyTabConfig(true);
+    } catch (err) {
+      showApiKeyQuickMsg(t("error.connection") + (err.message || "Unknown error"), "error");
+    } finally {
+      setApiKeyQuickSaving(false);
+    }
+  }
+
   // ── 加载已有配置 ──
 
   async function loadCurrentConfig() {
@@ -4449,6 +4725,20 @@
         });
       }
     }
+    if (els.btnToggleQuickApiKey) {
+      els.btnToggleQuickApiKey.addEventListener("click", togglePasswordVisibility);
+    }
+    if (els.btnSaveQuickApiKey) {
+      els.btnSaveQuickApiKey.addEventListener("click", handleSaveApiKeyQuick);
+    }
+    if (els.btnRefreshQuickModels) {
+      els.btnRefreshQuickModels.addEventListener("click", refreshApiKeyQuickModels);
+    }
+    if (els.apiKeyQuickInput) {
+      els.apiKeyQuickInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") handleSaveApiKeyQuick();
+      });
+    }
 
     // 通道启用指示灯绑定
     bindStatusDot(els.chEnabled, els.feishuStatusDot);
@@ -4799,6 +5089,24 @@
         window.oneclaw.checkForUpdates();
         aboutCheckBtn.textContent = t("about.checking");
         aboutCheckBtn.disabled = true;
+      });
+    }
+    if (els.aboutOriginalRepoLink) {
+      els.aboutOriginalRepoLink.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (window.oneclaw?.openExternal) window.oneclaw.openExternal("https://github.com/oneclaw/oneclaw");
+      });
+    }
+    if (els.aboutForkRepoLink) {
+      els.aboutForkRepoLink.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (window.oneclaw?.openExternal) window.oneclaw.openExternal("https://github.com/axiao43-cpu/deadclaw");
+      });
+    }
+    if (els.aboutReleaseLink) {
+      els.aboutReleaseLink.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (window.oneclaw?.openExternal) window.oneclaw.openExternal("https://github.com/axiao43-cpu/deadclaw/releases");
       });
     }
 
