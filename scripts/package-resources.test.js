@@ -119,6 +119,15 @@ test("Windows 全局 windowsHide 补丁应幂等（已有补丁不重复注入�
   ].join("\n");
   const execFile = path.join(distDir, "exec-abc.js");
   fs.writeFileSync(execFile, content);
+  fs.writeFileSync(path.join(distDir, "gateway-cli-placeholder.js"), [
+    "const child = spawn(process.execPath, args, {",
+    "\t\tenv: process.env,",
+    "\t\tdetached: true,",
+    '\t\tstdio: "inherit"',
+    "\t});",
+    'stopModelPricingRefresh = !minimalTestGateway && process.env.VITEST !== "1" ? startGatewayModelPricingRefresh({ config: cfgAtStart }) : () => {};',
+    "",
+  ].join("\n"));
 
   sandbox.patchWindowsOpenclawArtifacts(tmpRoot);
 
@@ -134,8 +143,17 @@ test("Windows 全局 windowsHide 补丁应覆盖 kimi-claw 插件", () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "oneclaw-package-resources-"));
   const distDir = path.join(tmpRoot, "node_modules", "openclaw", "dist");
   fs.mkdirSync(distDir, { recursive: true });
-  // 需要一个空 exec 文件让 patch 不报错
-  fs.writeFileSync(path.join(distDir, "placeholder.js"), "// empty\n");
+  // 需要占位 exec / gateway-cli 文件让 patch 不报错
+  fs.writeFileSync(path.join(distDir, "exec-placeholder.js"), 'const child = spawn(useCmdWrapper ? cmd : resolvedCommand, useCmdWrapper ? ["/d"] : finalArgv.slice(1), {\n\tstdio,\n\tcwd,\n});\n');
+  fs.writeFileSync(path.join(distDir, "gateway-cli-placeholder.js"), [
+    "const child = spawn(process.execPath, args, {",
+    "\t\tenv: process.env,",
+    "\t\tdetached: true,",
+    '\t\tstdio: "inherit"',
+    "\t});",
+    'stopModelPricingRefresh = !minimalTestGateway && process.env.VITEST !== "1" ? startGatewayModelPricingRefresh({ config: cfgAtStart }) : () => {};',
+    "",
+  ].join("\n"));
 
   // kimi-claw terminal-session-manager pipe 回退
   const kimiDir = path.join(tmpRoot, "node_modules", "openclaw", "extensions", "kimi-claw", "dist", "src");
@@ -147,6 +165,127 @@ test("Windows 全局 windowsHide 补丁应覆盖 kimi-claw 插件", () => {
 
   assert.match(fs.readFileSync(termFile, "utf-8"), /windowsHide:\s*true/);
   fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+test("openclaw 错误归一化补丁应替换循环引用风险的 JSON.stringify(error)", () => {
+  const sandbox = loadPackageResourcesSandbox();
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "oneclaw-package-errors-"));
+  const distDir = path.join(tmpRoot, "node_modules", "openclaw", "dist");
+  fs.mkdirSync(distDir, { recursive: true });
+
+  const embeddedFile = path.join(distDir, "pi-embedded-abc.js");
+  fs.writeFileSync(embeddedFile, [
+    "function describeUnknownError(error) {",
+    '  if (error instanceof Error) return error.message;',
+    '  if (typeof error === "string") return error;',
+    '  try { return JSON.stringify(error) ?? "Unknown error"; } catch { return "Unknown error"; }',
+    "}",
+    "",
+    "function summarizeDeliveryError(error) {",
+    '  if (error instanceof Error) return error.message || "error";',
+    '  if (typeof error === "string") return error;',
+    '  if (error === void 0 || error === null) return "unknown error";',
+    '  try { return JSON.stringify(error); } catch { return "error"; }',
+    "}",
+    "",
+  ].join("\n"));
+
+  sandbox.patchOpenclawErrorNormalizationArtifacts(tmpRoot);
+
+  const after = fs.readFileSync(embeddedFile, "utf-8");
+  assert.match(after, /function safeStringifyUnknownError\(error, fallback = "Unknown error"\)/);
+  assert.match(after, /safeStringifyUnknownError\(error\)/);
+  assert.match(after, /safeStringifyUnknownError\(error, "error"\)/);
+  assert.doesNotMatch(after, /return JSON\.stringify\(error\) \?\? "Unknown error"/);
+  assert.doesNotMatch(after, /return JSON\.stringify\(error\);/);
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+test("openclaw 错误归一化补丁应幂等", () => {
+  const sandbox = loadPackageResourcesSandbox();
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "oneclaw-package-errors-"));
+  const distDir = path.join(tmpRoot, "node_modules", "openclaw", "dist");
+  fs.mkdirSync(distDir, { recursive: true });
+
+  const embeddedFile = path.join(distDir, "pi-embedded-abc.js");
+  const content = [
+    'function safeStringifyUnknownError(error, fallback = "Unknown error") { return fallback; }',
+    "function describeUnknownError(error) {",
+    '  try { return safeStringifyUnknownError(error); } catch { return "Unknown error"; }',
+    "}",
+    "function summarizeDeliveryError(error) {",
+    '  try { return safeStringifyUnknownError(error, "error"); } catch { return "error"; }',
+    "}",
+    "",
+  ].join("\n");
+  fs.writeFileSync(embeddedFile, content);
+
+  sandbox.patchOpenclawErrorNormalizationArtifacts(tmpRoot);
+
+  const after = fs.readFileSync(embeddedFile, "utf-8");
+  assert.equal(after, content);
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+test("openclaw 错误归一化补丁在未命中时应失败", () => {
+  const sandbox = loadPackageResourcesSandbox({
+    process: Object.assign(Object.create(process), {
+      argv: process.argv.slice(),
+      env: { ...process.env },
+      exit(code) {
+        throw new Error(`process.exit:${code}`);
+      },
+    }),
+  });
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "oneclaw-package-errors-"));
+  const distDir = path.join(tmpRoot, "node_modules", "openclaw", "dist");
+  fs.mkdirSync(distDir, { recursive: true });
+  fs.writeFileSync(path.join(distDir, "exec-placeholder.js"), 'const child = spawn(useCmdWrapper ? cmd : resolvedCommand, useCmdWrapper ? ["/d"] : finalArgv.slice(1), {\n\tstdio,\n\tcwd,\n});\n');
+  fs.writeFileSync(path.join(distDir, "gateway-cli-placeholder.js"), [
+    "const child = spawn(process.execPath, args, {",
+    "\t\tenv: process.env,",
+    "\t\tdetached: true,",
+    '\t\tstdio: "inherit"',
+    "\t});",
+    'stopModelPricingRefresh = !minimalTestGateway && process.env.VITEST !== "1" ? startGatewayModelPricingRefresh({ config: cfgAtStart }) : () => {};',
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(distDir, "placeholder.js"), "console.log('noop');\n");
+
+  assert.throws(
+    () => sandbox.patchOpenclawErrorNormalizationArtifacts(tmpRoot),
+    /process\.exit:1/
+  );
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+test("getPackageSource 应默认使用 package.json 中固定的 openclaw 版本", () => {
+  const sandbox = loadPackageResourcesSandbox({
+    process: Object.assign(Object.create(process), {
+      argv: process.argv.slice(),
+      env: { ...process.env },
+    }),
+  });
+
+  const result = sandbox.getPackageSource();
+  assert.equal(result.source, "2026.3.13");
+  assert.equal(result.stampSource, "package:openclaw@2026.3.13");
+});
+
+test("getPackageSource 应优先使用 OPENCLAW_PACKAGE_SOURCE 覆盖默认版本", () => {
+  const sandbox = loadPackageResourcesSandbox({
+    process: Object.assign(Object.create(process), {
+      argv: process.argv.slice(),
+      env: { ...process.env, OPENCLAW_PACKAGE_SOURCE: "2026.4.1" },
+    }),
+  });
+
+  const result = sandbox.getPackageSource();
+  assert.equal(result.source, "2026.4.1");
+  assert.equal(result.stampSource, "explicit:2026.4.1");
 });
 
 // 白名单裁剪必须深入保留插件内部继续清垃圾，而不是把整个 extensions 目录豁免掉。

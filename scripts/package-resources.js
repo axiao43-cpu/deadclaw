@@ -29,6 +29,7 @@ const KIMI_SEARCH_CACHE_FILE = "openclaw-kimi-search-0.1.2.tgz";
 const QQBOT_PACKAGE_NAME = "@sliverp/qqbot";
 const DINGTALK_CONNECTOR_PACKAGE_NAME = "@dingtalk-real-ai/dingtalk-connector";
 const WECOM_PLUGIN_PACKAGE_NAME = "@wecom/wecom-openclaw-plugin";
+const PACKAGE_JSON_PATH = path.join(ROOT, "package.json");
 
 // 计算目标产物的唯一标识
 function getTargetId(platform, arch) {
@@ -687,7 +688,18 @@ function writeBuildConfig(configPath) {
 
 // ─── Step 2: 安装 openclaw 生产依赖 ───
 
-// 确定 openclaw 安装来源：查询 npm latest stable
+function readBundledOpenclawVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, "utf-8"));
+    const version = normalizeSemverText(pkg && pkg.oneclaw && pkg.oneclaw.openclaw);
+    return version || "";
+  } catch (err) {
+    log(`读取 package.json 默认 openclaw 版本失败: ${err.message || String(err)}`);
+    return "";
+  }
+}
+
+// 确定 openclaw 安装来源：优先环境变量，其次 package.json 配置，最后 npm latest
 function getPackageSource() {
   // 显式覆盖（调试/测试用逃生舱）
   const explicitSource = readEnvText("OPENCLAW_PACKAGE_SOURCE");
@@ -696,6 +708,15 @@ function getPackageSource() {
     return {
       source: explicitSource,
       stampSource: `explicit:${explicitSource}`,
+    };
+  }
+
+  const bundledVersion = readBundledOpenclawVersion();
+  if (bundledVersion) {
+    log(`使用 package.json 固定版本 openclaw@${bundledVersion}`);
+    return {
+      source: bundledVersion,
+      stampSource: `package:openclaw@${bundledVersion}`,
     };
   }
 
@@ -1205,6 +1226,7 @@ function installDependencies(opts, gatewayDir) {
     pruneDanglingBinLinks(nmDir);
     assertNativeDepsMatchTarget(nmDir, opts.platform, opts.arch);
     patchWindowsOpenclawArtifacts(gatewayDir, opts.platform);
+    patchOpenclawErrorNormalizationArtifacts(gatewayDir);
     return;
   }
 
@@ -1242,6 +1264,7 @@ function installDependencies(opts, gatewayDir) {
   pruneDanglingBinLinks(nmDir);
   assertNativeDepsMatchTarget(nmDir, opts.platform, opts.arch);
   patchWindowsOpenclawArtifacts(gatewayDir, opts.platform);
+  patchOpenclawErrorNormalizationArtifacts(gatewayDir);
   fs.writeFileSync(stampPath, targetStamp);
   log("node_modules 裁剪完成");
 }
@@ -1342,6 +1365,76 @@ function hasGatewayCliPatches(source) {
 
 function hasGatewayRespawnWindowsHide(source) {
   return /spawn\(process\.execPath, args, \{[\s\S]*?windowsHide:\s*true[\s\S]*?env: process\.env,/.test(source);
+}
+
+function patchOpenclawErrorNormalizationArtifacts(gatewayDir) {
+  const distDir = path.join(gatewayDir, "node_modules", "openclaw", "dist");
+  if (!fs.existsSync(distDir)) {
+    die(`openclaw dist 目录不存在，无法应用错误归一化补丁: ${distDir}`);
+  }
+
+  const candidateFiles = fs.readdirSync(distDir).filter((name) => /\.js$/.test(name));
+  const result = patchWindowsOpenclawFiles(
+    distDir,
+    candidateFiles,
+    injectOpenclawSafeErrorNormalization,
+    hasOpenclawSafeErrorNormalization
+  );
+
+  if (candidateFiles.length === 0 || result.ready === 0) {
+    die("未能为 openclaw embedded 错误归一化注入安全序列化补丁，构建已终止");
+  }
+
+  log(`已应用 openclaw 错误归一化补丁：${result.patched}/${result.ready}`);
+}
+
+function injectOpenclawSafeErrorNormalization(source) {
+  const helper = [
+    'function safeStringifyUnknownError(error, fallback = "Unknown error") {',
+    '  const seen = new Set();',
+    '  const pick = {};',
+    '  if (error && typeof error === "object") {',
+    '    if (typeof error.message === "string" && error.message) pick.message = error.message;',
+    '    if (typeof error.name === "string" && error.name) pick.name = error.name;',
+    '    if (typeof error.code === "string" && error.code) pick.code = error.code;',
+    '    if (typeof error.status === "number") pick.status = error.status;',
+    '    if (typeof error.statusCode === "number") pick.statusCode = error.statusCode;',
+    '    if (error.cause !== void 0 && typeof error.cause !== "object") pick.cause = error.cause;',
+    '  }',
+    '  const target = Object.keys(pick).length ? pick : error;',
+    '  const text = JSON.stringify(target, (key, value) => {',
+    '    if (key === "socket" || key === "parser" || key === "request" || key === "response" || key === "req" || key === "res" || key === "_httpMessage") return void 0;',
+    '    if (typeof value === "object" && value !== null) {',
+    '      if (seen.has(value)) return "[Circular]";',
+    '      seen.add(value);',
+    '    }',
+    '    return value;',
+    '  });',
+    '  return text || fallback;',
+    '}',
+    '',
+  ].join("\n");
+
+  let next = source;
+  if (!hasOpenclawSafeErrorNormalization(next) && next.includes("function describeUnknownError(error) {")) {
+    next = next.replace("function describeUnknownError(error) {", `${helper}function describeUnknownError(error) {`);
+  }
+
+  next = next.replace(
+    /try \{\s*return JSON\.stringify\(error\) \?\? "Unknown error";\s*\} catch \{\s*return "Unknown error";\s*\}/,
+    'try { return safeStringifyUnknownError(error); } catch { return "Unknown error"; }'
+  );
+
+  next = next.replace(
+    /try \{\s*return JSON\.stringify\(error\);\s*\} catch \{\s*return "error";\s*\}/,
+    'try { return safeStringifyUnknownError(error, "error"); } catch { return "error"; }'
+  );
+
+  return next;
+}
+
+function hasOpenclawSafeErrorNormalization(source) {
+  return /function safeStringifyUnknownError\(error, fallback = "Unknown error"\)/.test(source);
 }
 
 // ─── Step 2.5: 注入 bundled 插件（kimi-search + qqbot + dingtalk） ───
